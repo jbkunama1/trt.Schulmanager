@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="trt.Schulmanager Banner">
+  <rect width="1200" height="300" fill="#101a2e"/>
+  <rect x="0" y="0" width="1200" height="6" fill="#2563eb"/>
+  <text x="70" y="120" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="62" font-weight="800" fill="#ffffff">trt.Schulmanager</text>
+  <text x="74" y="170" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="26" fill="#94a3b8">Klassenbuch · Schüler · Noten · Planung — das Lehrer-Cockpit</text>
+  <text x="74" y="212" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="19" fill="#60a5fa">FastAPI + SQLite · Docker-Deploy · 11 Themes · GitHub Pages</text>
+  <g>
+    <rect x="70"   y="240" width="98" height="26" rx="6" fill="#2563eb"/>
+    <rect x="174"  y="240" width="98" height="26" rx="6" fill="#334155"/>
+    <rect x="278"  y="240" width="98" height="26" rx="6" fill="#d97706"/>
+    <rect x="382"  y="240" width="98" height="26" rx="6" fill="#ff2d95"/>
+    <rect x="486"  y="240" width="98" height="26" rx="6" fill="#00ff41"/>
+    <rect x="590"  y="240" width="98" height="26" rx="6" fill="#ffb000"/>
+    <rect x="694"  y="240" width="98" height="26" rx="6" fill="#16a34a"/>
+    <rect x="798"  y="240" width="98" height="26" rx="6" fill="#8b5e34"/>
+    <rect x="902"  y="240" width="98" height="26" rx="6" fill="#fde68a"/>
+    <rect x="1006" y="240" width="98" height="26" rx="6" fill="#0e7490"/>
+    <rect x="1110" y="240" width="20" height="26" rx="6" fill="#a78bfa"/>
+  </g>
+</svg>

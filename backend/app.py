@@ -1,0 +1,1 @@
+[FastAPI-Backend mit SQLite: POST /api/login (APP_PASSWORD, Bearer-Token), GET/PUT/DELETE /api/state mit Auth, GET /api/health, statisches Frontend aus /static — identisch mit der erstellten Version]
