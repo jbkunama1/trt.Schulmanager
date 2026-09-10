@@ -12,14 +12,16 @@ services:
       # Login-Passwort der Web-App — in Portainer anpassen!
       - APP_PASSWORD=lehrer2026
       # 🤖 Telegram-Bot (Token von @BotFather; leer lassen = Telegram deaktiviert)
-      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       # Deine Chat-ID (erhältst du per /start vom Bot; leer = Bot antwortet jedem mit dessen ID)
-      - TELEGRAM_CHAT_ID=
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       # ⏰ Tägliche Klassenbuch-Erinnerung Mo–Fr, z. B. 17:30 (leer = Erinnerung deaktiviert)
       - REMINDER_TIME=17:30
       # 📎 Zugangscode für Schüler-Uploads unter /upload (leer = Upload ohne Code möglich)
       - UPLOAD_CODE=
-    restart: unless-stopped
+    networks:
+      - highfishNetwork
 
-volumes:
-  schulmanager-data:
+networks:
+  highfishNetwork:
+    external: true
