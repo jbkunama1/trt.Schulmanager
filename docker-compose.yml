@@ -19,7 +19,9 @@ services:
       - REMINDER_TIME=17:30
       # 📎 Zugangscode für Schüler-Uploads unter /upload (leer = Upload ohne Code möglich)
       - UPLOAD_CODE=
-    restart: unless-stopped
+    networks:
+      - highfishNetwork
 
-volumes:
-  schulmanager-data:
+networks:
+  highfishNetwork:
+    external: true
