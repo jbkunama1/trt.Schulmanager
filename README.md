@@ -17,7 +17,7 @@
 [![Telegram](https://img.shields.io/badge/Telegram-Bot%20%E2%9C%95-26A5E4?style=for-the-badge&logo=telegram)](#-telegram-integration)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-a855f7?style=for-the-badge&logo=open-source-initiative)](./LICENSE)
 
-[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [📦 Portainer-Deploy](#-portainer-deploy-aus-github-empfohlen) · [🤖 Telegram](#-telegram-integration) · [🎨 Themes](#-themes)
+[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [📦 Portainer-Deploy](#-portainer-deploy-aus-github-empfohlen) · [🤖 Telegram](#-telegram-integration) · [📎 Ablage](#-ablage--upload) · [🎨 Themes](#-themes)
 
 </div>
 
@@ -33,7 +33,7 @@
 | [`trt.Schuelermanager`](https://github.com/jbkunama1/trt.Schuelermanager) | 👥 Schülerprofile mit 📷 Foto, 🏷️ Besonderheiten, ⭐ Sozialpunkten, 📊 Statistik-Dashboard |
 | `Notenwerk` (Nachbau der „Notenrechner"-App) | 🧮 Notenschlüssel (IHK, KMK 15–0, linear), 🔑 Schlüssel-Generator (16 Stufen, Sockel), 📝 Notenmatrix mit Gewichtung & Overrides, 🎓 automatische Zeugnisnote, 📈 Durchschnittsrechner |
 
-**✅ Verbessert gegenüber den Originalen:** echte SQLite-Persistenz, serverseitiges Login mit ENV-Passwort, korrekte ISO-8601-Kalenderwochen, Autosave mit Multi-Device-Sync, 🎨 11 Themes im Admin-Bereich, 📱 Mobile-First-Ansicht, 🤖 Telegram-Bot.
+**✅ Verbessert gegenüber den Originalen:** echte SQLite-Persistenz, serverseitiges Login mit ENV-Passwort, korrekte ISO-8601-Kalenderwochen, Autosave mit Multi-Device-Sync, 🎨 11 Themes im Admin-Bereich, 📱 Mobile-First-Ansicht, 🤖 Telegram-Bot, 📎 Ablage mit Schüler-Uploads.
 
 ---
 
@@ -49,8 +49,31 @@
 | 🗂️ **Planung** | Stoffverteilung (Geplant / In Bearbeitung / Abgeschlossen), UVP-, Beobachtungs- und Reflexions-Dokumente |
 | 🎛️ **Admin** | Theme-Galerie (11 Themes, serverweit für alle Geräte), Stunden-pro-Tag, Sicherheitshinweise |
 | 💾 **Backup** | JSON-Export/Import, Server-Löschung, Sync-Statusanzeige |
+| 📎 **Ablage** | `/upload`-Seite für Schüler-Uploads (optional mit Zugangscode) + Lehrer-Verwaltung + Telegram-Datei-Empfang |
 
 📱 **Mobile-First:** Auf dem Handy werden Klassenbuchzeilen zu antippbaren Karten, die Notenmatrix behält die Namensspalte sticky, Modals öffnen als Bottom-Sheets (inkl. iOS-Safe-Area), 16px-Inputs verhindern iOS-Zoom, 44px-Touch-Targets, Statusleiste färbt sich pro Theme.
+
+---
+
+## 📎 Ablage & Upload
+
+Unter **`http://<server-ip>:8086/upload`** liegt eine eigenständige Ablage-Seite:
+
+- **📤 Für Schüler (und dich):** Datei auswählen → hochladen — fertig. Optional mit **Zugangscode** (`UPLOAD_CODE`) geschützt, damit nicht jeder Hochladen kann. Schüler brauchen **nicht** dein Lehrer-Passwort.
+- **🔐 Für dich (Lehrer):** Mit dem App-Passwort einloggen → alle Dateien sehen, herunterladen, löschen.
+- **🤖 Via Telegram:** Dateien und Fotos einfach an den Bot schicken — sie landen automatisch in der Ablage (mit Bestätigung). `/files` listet die neuesten Dateien.
+
+**Technik & Limits:**
+
+| Eigenschaft | Wert |
+|---|---|
+| Speicherort | `/data/uploads/` im Docker-Volume (überlebt Updates) |
+| Max. Dateigröße | 25 MB (Telegram übergibt max. 20 MB) |
+| Dateinamen | werden sanitiziert (nur Buchstaben, Zahlen, `-_.` und Leerzeichen) — kein Path-Traversal möglich |
+| Namens-Kollisionen | bekommen automatisch Suffix `_1`, `_2`, … |
+| Download/Löschen | nur mit Lehrer-Login (Bearer-Token) |
+
+**ENV:** `UPLOAD_CODE` (leer = Upload ohne Code möglich).
 
 ---
 
@@ -77,7 +100,10 @@ Der eingebaute Bot (reine Python-Standardbibliothek, keine Zusatz-Dependencies) 
 | `/status` | 📊 Dashboard-Kennzahlen: Klassen, Schüler, Wocheneinträge, erfasste Noten, aktive Einheiten |
 | `/heute` | 📖 Heutige Klassenbuchstunden (Fach, Thema, Hausaufgabe) — oder die Aufforderung, endlich einzutragen 😉 |
 | `/noten 9b` | 🎓 Zeugnisnoten der Klasse (gewichteter Schnitt je Schüler, inkl. ≈ Notenpunkte 15–0) — die Notenschlüssel-Logik (IHK/KMK/linear/Sockel) ist 1:1 ins Backend portiert |
+| `/files` | 📎 Neueste Dateien in der Ablage |
 | `/help` | Befehlsübersicht |
+
+**📎 Dateien ablegen:** Dokumente und Fotos einfach in den Chat schicken — der Bot lädt sie herunter und legt sie in der Ablage ab (s. [Ablage & Upload](#-ablage--upload)).
 
 ### ⏰ Tägliche Erinnerung
 
@@ -93,7 +119,8 @@ Mo–Fr zur `REMINDER_TIME` prüft der Bot, ob für den heutigen Tag Klassenbuch
 graph LR
     B["🌐 Browser (index.html)<br/>Mobile-First"] -->|"POST /api/login 🔐"| A["⚙️ FastAPI (app.py)<br/>Port 8080"]
     B -->|"Autosave 700 ms<br/>GET/PUT/DELETE /api/state"| A
-    A --> S[("💾 SQLite<br/>/data/schulmanager.db<br/>WAL-Modus")]
+    B2["📎 /upload<br/>Ablage-Seite"] -->|"POST /api/upload"| A
+    A --> S[("💾 SQLite<br/>/data/schulmanager.db<br/>+ /data/uploads/")]
     T["🤖 Telegram"] <-->|"Long-Polling (out)"| A
     A -->|"statisch aus /static"| B
 ```
@@ -104,10 +131,10 @@ graph LR
 trt.Schulmanager/
 ├── index.html                     # 🌐 Komplette App (8 Module, 11 Themes, Mobile-First)
 ├── backend/
-│   ├── app.py                     # ⚙️ FastAPI: Login, State-API, SQLite, Telegram-Bot
-│   └── requirements.txt           # 🐍 fastapi, uvicorn (Telegram = reine stdlib!)
+│   ├── app.py                     # ⚙️ FastAPI: Login, State-API, SQLite, Telegram-Bot, Ablage
+│   └── requirements.txt           # 🐍 fastapi, uvicorn (Telegram & Uploads = reine stdlib!)
 ├── Dockerfile                     # 🐳 python:3.12-slim + Healthcheck
-├── docker-compose.yml             # 🚀 GHCR-Image, Port 8086, Volume, ENVs (App + Telegram)
+├── docker-compose.yml             # 🚀 GHCR-Image, Port 8086, Volume, ENVs (App + Telegram + Ablage)
 ├── .github/workflows/
 │   ├── build-and-push.yml         # 🐳 Build & Push nach GHCR + Trivy-Scan
 │   └── deploy-pages.yml           # 📄 GitHub-Pages-Deployment (Live-Demo)
@@ -126,9 +153,11 @@ trt.Schulmanager/
 | Methode | Pfad | Funktion |
 |---|---|---|
 | `POST` | `/api/login` | 🔐 Passwort-Login → Bearer-Token |
-| `GET` | `/api/state` | 📥 Gesamten State laden |
-| `PUT` | `/api/state` | 💾 State speichern (Autosave) |
-| `DELETE` | `/api/state` | 🗑️ Alles löschen |
+| `GET`/`PUT`/`DELETE` | `/api/state` | 📥💾🗑️ App-State (Autosave, auth) |
+| `POST` | `/api/upload` | 📎 Datei hochladen (optional `UPLOAD_CODE`) |
+| `GET` | `/api/files` | 📋 Dateiliste (auth) |
+| `GET`/`DELETE` | `/api/files/{name}` | ⬇️🗑️ Datei herunterladen/löschen (auth) |
+| `GET` | `/upload` | 🌐 Ablage-Seite (Schüler + Lehrer) |
 | `GET` | `/api/health` | 🩺 Healthcheck (inkl. DB-Check) |
 
 ---
@@ -176,6 +205,7 @@ Der Stack nutzt das **fertige GHCR-Image** — auf dem Server wird nichts gebaut
 | `TELEGRAM_BOT_TOKEN` | optional | Token von @BotFather — leer = Telegram aus |
 | `TELEGRAM_CHAT_ID` | optional | Deine Chat-ID (erhältst du per `/start` vom Bot) — schränkt den Bot auf dich ein |
 | `REMINDER_TIME` | optional | Tägliche Klassenbuch-Erinnerung Mo–Fr, z. B. `17:30` — leer = aus |
+| `UPLOAD_CODE` | optional | Zugangscode für Schüler-Uploads unter `/upload` — leer = ohne Code |
 
 4. **Deploy the stack** 🚀
 
@@ -197,10 +227,11 @@ services:
       - TELEGRAM_BOT_TOKEN=            # 🤖 leer = Telegram aus
       - TELEGRAM_CHAT_ID=
       - REMINDER_TIME=17:30           # ⏰ leer = Erinnerung aus
+      - UPLOAD_CODE=                  # 📎 leer = Upload ohne Code
     restart: unless-stopped
 ```
 
-Danach erreichbar unter `http://<server-ip>:8086`. Die SQLite-Datenbank liegt im Volume `schulmanager-data` und überlebt Updates & Neustarts.
+Danach erreichbar unter `http://<server-ip>:8086` (Ablage: `/upload`). Die SQLite-Datenbank und die Ablage liegen im Volume `schulmanager-data` und überleben Updates & Neustarts.
 
 ### 🐳 Docker ohne Portainer
 
@@ -213,6 +244,7 @@ docker run -d --name trt-schulmanager \
   -e TELEGRAM_BOT_TOKEN="123:ABC" \
   -e TELEGRAM_CHAT_ID="123456" \
   -e REMINDER_TIME="17:30" \
+  -e UPLOAD_CODE="mein-klasse-code" \
   --restart unless-stopped \
   ghcr.io/jbkunama1/trt.schulmanager:latest
 
@@ -223,11 +255,12 @@ docker run -d --name trt-schulmanager \
  docker run -d --name trt-schulmanager -p 8086:8080 -v trt-schulmanager-data:/data -e APP_PASSWORD="dein-passwort" --restart unless-stopped trt-schulmanager
 ```
 
-**💾 Datenbank sichern:**
+**💾 Datenbank & Ablage sichern:**
 
 ```bash
 docker exec trt-schulmanager sqlite3 /data/schulmanager.db "SELECT updated_at, length(json) FROM state;"
 docker cp trt-schulmanager:/data/schulmanager.db ./backup-$(date +%F).db
+docker cp trt-schulmanager:/data/uploads ./backup-uploads-$(date +%F)
 ```
 
 ### 📄 GitHub Pages (Live-Demo)
@@ -246,6 +279,7 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 
 - 🔑 Login serverseitig geprüft, Passwort über Umgebungsvariable `APP_PASSWORD` (nie im Frontend-Code)
 - 🎫 Session-Token nur im RAM des Containers — Container-Restart meldet alle Sitzungen ab
+- 📎 Ablage: Uploads optional mit separatèr `UPLOAD_CODE` (Schüler brauchen nicht das Lehrer-Passwort), Download/Löschen nur für Lehrer-Login, sanitizierte Dateinamen
 - 🤖 Telegram-Bot antwortet nur deiner Chat-ID (`TELEGRAM_CHAT_ID`), nur ausgehende Verbindungen
 - 🚫 Kein Account-System, kein Tracking, keine Cloud — Daten bleiben auf deinem Server
 - 👤 Schülerdaten (Name, Foto, Besonderheiten!): **Pseudonymisierung** (Initialen, Listenplätze) empfohlen — die Lehrkraft bleibt datenschutzrechtlich verantwortlich
@@ -270,6 +304,7 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 - [ ] 📝 Bewertungsbogen-Modul (Hospitationsbögen aus `trt.Klassenbuch/bewertungsbogen`)
 - [ ] ✅ Anwesenheitserfassung direkt im Klassenbuch
 - [ ] 🤖 Weitere Telegram-Commands (z. B. /kw für Wochenübersicht, Noten-Statistik)
+- [ ] 📎 Ablage: Ordner pro Klasse, Upload-Benachrichtigung an Lehrer via Telegram
 - [ ] 📱 PWA (Service Worker) für echte Offline-Nutzung
 - [ ] 🇩🇪 Bundesland-Notenschlüssel (BW, Bayern, NRW) als Vorlagen
 - [ ] 👤 Schüler-Notenansicht (schriftlich/mündlich-Listen aus trt.Schuelermanager)
@@ -280,8 +315,8 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 ## 🧪 Tech Stack
 
 - 🧱 **Frontend:** HTML5, CSS3 (Custom Properties für 11 Themes, Mobile-First-Media-Queries), Vanilla JavaScript (ES6) — keine Build-Pipeline, keine externen Abhängigkeiten
-- ⚙️ **Backend:** Python 3.12, FastAPI, uvicorn; Telegram-Bot in reiner Standardbibliothek (urllib + threading)
-- 💾 **Datenbank:** SQLite (Standardbibliothek, WAL-Modus)
+- ⚙️ **Backend:** Python 3.12, FastAPI, uvicorn; Telegram-Bot & Uploads in reiner Standardbibliothek (urllib + threading)
+- 💾 **Datenbank:** SQLite (Standardbibliothek, WAL-Modus) + Datei-Ablage auf Docker-Volume
 - 🐳 **Deployment:** GHCR-Image via GitHub Actions (Buildx + metadata-action + Trivy-Scan), Portainer-Stack oder docker run, Healthcheck
 - 📄 **Demo:** GitHub Pages via GitHub Actions
 
