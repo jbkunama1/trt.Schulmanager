@@ -1,10 +1,15 @@
-"""trt.Schulmanager (LehrerWerk) — FastAPI-Backend mit SQLite, Login und Telegram-Integration.
+"""trt.Schulmanager (LehrerWerk) — FastAPI-Backend mit SQLite, Login, Telegram und Ablage.
 
 - Kompletter App-State als JSON-Dokument in SQLite (Tabelle `state`, einzelne Zeile)
 - Login mit Passwort aus ENV (APP_PASSWORD), Session-Token im RAM
-- Optionale Telegram-Integration (reine Standardbibliothek, keine Zusatz-Dependencies):
-  * Bot-Commands: /start /help /status /heute /noten <Klasse>
+- Telegram-Integration (reine Standardbibliothek):
+  * Bot-Commands: /start /help /status /heute /noten <Klasse> /files
+  * Dateien/Fotos direkt in den Chat schicken -> landen in der Ablage
   * Taegliche Klassenbuch-Erinnerung (Mo-Fr) an TELEGRAM_CHAT_ID
+- Ablage / Upload:
+  * POST /api/upload (Rohbytes, optional UPLOAD_CODE fuer Schueler)
+  * GET /api/files, GET/DELETE /api/files/{name} (Bearer-auth, Lehrer)
+  * GET /upload -> eigenstaendige Upload-Seite (Schueler + Lehrer-Bereich)
 - Statisches Frontend aus /static, WAL-Modus, ein Worker pro Container
 """
 import json
@@ -20,6 +25,7 @@ from pathlib import Path
 from typing import Set
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 DB_PATH = os.environ.get("DB_PATH", "/data/lehrerwerk.db")
@@ -27,10 +33,13 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "lehrer2026")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 REMINDER_TIME = os.environ.get("REMINDER_TIME", "").strip()  # z. B. "17:30", leer = aus
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
+UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()  # leer = Upload ohne Code
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (Telegram liefert max. 20 MB)
 
 DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
-app = FastAPI(title="trt.Schulmanager API", version="2.1.0")
+app = FastAPI(title="trt.Schulmanager API", version="2.2.0")
 TOKENS: Set[str] = set()
 
 
@@ -125,6 +134,210 @@ def delete_state():
     return {"ok": True}
 
 
+# ============ Ablage / Upload ============
+
+
+def sanitize_filename(name: str) -> str:
+    name = os.path.basename((name or "datei").replace("\\", "/"))
+    out = []
+    for ch in name:
+        out.append(ch if (ch.isalnum() or ch in "-_. ") else "_")
+    name = "".join(out).strip(" .") or "datei"
+    return name[:120]
+
+
+def unique_target(directory: Path, name: str) -> Path:
+    candidate = directory / name
+    stem, suffix = candidate.stem, candidate.suffix
+    i = 1
+    while candidate.exists():
+        candidate = directory / f"{stem}_{i}{suffix}"
+        i += 1
+    return candidate
+
+
+def store_upload(data: bytes, name: str) -> str:
+    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+    target = unique_target(Path(UPLOAD_DIR), sanitize_filename(name))
+    target.write_bytes(data)
+    return target.name
+
+
+@app.post("/api/upload")
+async def upload_file(request: Request, filename: str = "", code: str = ""):
+    if UPLOAD_CODE and code != UPLOAD_CODE:
+        raise HTTPException(status_code=401, detail="Falscher Zugangscode")
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Leere Datei")
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Datei zu gross (max. 25 MB)")
+    name = store_upload(body, filename or "datei")
+    return {"ok": True, "name": name, "size": len(body)}
+
+
+@app.get("/api/files", dependencies=[Depends(require_auth)])
+def list_files():
+    d = Path(UPLOAD_DIR)
+    files = []
+    if d.exists():
+        for p in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.is_file():
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size": st.st_size,
+                        "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                    }
+                )
+    return {"files": files}
+
+
+@app.get("/api/files/{name}", dependencies=[Depends(require_auth)])
+def download_file(name: str):
+    safe = sanitize_filename(name)
+    p = Path(UPLOAD_DIR) / safe
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    return Response(
+        content=p.read_bytes(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="' + safe + '"'},
+    )
+
+
+@app.delete("/api/files/{name}", dependencies=[Depends(require_auth)])
+def delete_file(name: str):
+    safe = sanitize_filename(name)
+    p = Path(UPLOAD_DIR) / safe
+    if p.is_file():
+        p.unlink()
+    return {"ok": True}
+
+
+UPLOAD_PAGE = """<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trt.Schulmanager — Ablage</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#16233a;--mut:#64748b;--acc:#2563eb;--line:#e2e8f0;--red:#dc2626}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#101a2e;color:#fff;padding:14px 16px;font-weight:800;font-size:18px}
+header span{font-weight:400;font-size:12px;color:#94a3b8;margin-left:8px}
+main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+h2{margin:0 0 4px;font-size:20px}
+p{color:var(--mut);font-size:14px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px;font-weight:600}
+input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px}
+.btn.ghost{background:var(--card);color:var(--acc);border:1px solid var(--acc)}
+.btn.red{background:var(--red)}
+.msg{margin-top:10px;font-size:14px;padding:10px;border-radius:8px;display:none}
+.show-ok{background:#dcfce7;color:#166534;display:block!important}
+.show-err{background:#fee2e2;color:#991b1b;display:block!important}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left}
+th{background:#f1f5f9;font-size:12px;text-transform:uppercase;color:#475569}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>📎 trt.Schulmanager <span>Ablage / Upload</span></header>
+<main>
+<div class="card">
+<h2>📤 Datei hochladen</h2>
+<p>Dokument auswählen und hochladen — es landet direkt in der Ablage. Alternativ: einfach per Telegram an den Bot schicken.</p>
+<label>Datei</label><input type="file" id="file">
+<label>Zugangscode (falls erforderlich)</label><input type="text" id="code" placeholder="z. B. vom Lehrer erhalten" autocomplete="off">
+<button class="btn" onclick="doUpload()">Hochladen</button>
+<div id="umsg" class="msg"></div>
+</div>
+<div class="card">
+<h2>🔐 Lehrer-Bereich</h2>
+<p>Mit dem App-Passwort einloggen, um alle Dateien zu sehen, herunterzuladen oder zu löschen.</p>
+<label>Passwort</label><input type="password" id="pw" placeholder="App-Passwort">
+<button class="btn ghost" onclick="doLogin()">Anmelden</button>
+<div id="lmsg" class="msg"></div>
+<div id="filesWrap" class="hidden">
+<div style="overflow-x:auto"><table id="ftable"><thead><tr><th>Datei</th><th>Größe</th><th>Datum</th><th style="width:100px"></th></tr></thead><tbody></tbody></table></div>
+</div>
+</div>
+</main>
+<script>
+var TOKEN = sessionStorage.getItem("lw_token") || null;
+function msg(id, text, cls){var el = document.getElementById(id); el.textContent = text; el.className = "msg " + cls;}
+function fmtSize(b){return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : (b / 1024).toFixed(0) + " KB";}
+async function doUpload(){
+  var f = document.getElementById("file").files[0];
+  if(!f){msg("umsg", "Bitte zuerst eine Datei auswählen.", "show-err"); return;}
+  var code = document.getElementById("code").value;
+  msg("umsg", "Lädt hoch …", "show-ok");
+  try{
+    var buf = await f.arrayBuffer();
+    var r = await fetch("/api/upload?filename=" + encodeURIComponent(f.name) + "&code=" + encodeURIComponent(code), {method: "POST", body: buf});
+    var j = await r.json().catch(function(){return {};});
+    if(r.ok){msg("umsg", "✅ Gespeichert: " + (j.name || f.name), "show-ok"); if(TOKEN) loadFiles();}
+    else msg("umsg", "❌ " + (j.detail || "Fehler"), "show-err");
+  }catch(e){msg("umsg", "❌ Upload fehlgeschlagen: " + e.message, "show-err");}
+}
+async function doLogin(){
+  try{
+    var r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({password: document.getElementById("pw").value})});
+    if(!r.ok){msg("lmsg", "❌ Falsches Passwort", "show-err"); return;}
+    var j = await r.json(); TOKEN = j.token; sessionStorage.setItem("lw_token", TOKEN);
+    loadFiles();
+  }catch(e){msg("lmsg", "❌ Server nicht erreichbar", "show-err");}
+}
+async function loadFiles(){
+  try{
+    var r = await fetch("/api/files", {headers: {Authorization: "Bearer " + TOKEN}});
+    if(r.status === 401){TOKEN = null; sessionStorage.removeItem("lw_token"); msg("lmsg", "Sitzung abgelaufen — neu anmelden", "show-err"); return;}
+    var j = await r.json();
+    document.getElementById("filesWrap").classList.remove("hidden");
+    var tb = document.querySelector("#ftable tbody"); tb.innerHTML = "";
+    if(!j.files.length){tb.innerHTML = '<tr><td colspan="4" style="color:var(--mut)">Noch keine Dateien.</td></tr>'; return;}
+    j.files.forEach(function(f){
+      var tr = document.createElement("tr");
+      var td = document.createElement("td"); td.textContent = f.name; tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = fmtSize(f.size); tr.appendChild(td);
+      td = document.createElement("td"); td.textContent = new Date(f.modified).toLocaleString("de-DE"); tr.appendChild(td);
+      td = document.createElement("td");
+      var b1 = document.createElement("button"); b1.className = "btn ghost"; b1.style.cssText = "margin:0;padding:4px 10px;font-size:12px"; b1.textContent = "⬇"; b1.onclick = function(){dl(f.name);}; td.appendChild(b1);
+      var b2 = document.createElement("button"); b2.className = "btn red"; b2.style.cssText = "margin:0 0 0 4px;padding:4px 10px;font-size:12px"; b2.textContent = "✕"; b2.onclick = function(){del(f.name);}; td.appendChild(b2);
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+  }catch(e){msg("lmsg", "❌ " + e.message, "show-err");}
+}
+async function dl(name){
+  var r = await fetch("/api/files/" + encodeURIComponent(name), {headers: {Authorization: "Bearer " + TOKEN}});
+  if(!r.ok) return;
+  var blob = await r.blob();
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);}, 3000);
+}
+async function del(name){
+  if(!confirm("Diese Datei wirklich löschen?")) return;
+  await fetch("/api/files/" + encodeURIComponent(name), {method: "DELETE", headers: {Authorization: "Bearer " + TOKEN}});
+  loadFiles();
+}
+if(TOKEN) loadFiles();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/upload")
+def upload_page():
+    return HTMLResponse(UPLOAD_PAGE)
+
+
 # ============ Notenlogik (Port aus dem Frontend, fuer Telegram-Befehle) ============
 
 BUILTIN_SCALES = {
@@ -196,7 +409,10 @@ HELP_TEXT = (
     "/status — Dashboard-Kennzahlen\n"
     "/heute — heutige Klassenbuchstunden\n"
     "/noten <Klasse> — Zeugnisnoten (z. B. /noten 9b)\n"
-    "/help — diese Übersicht"
+    "/files — neueste Dateien in der Ablage\n"
+    "/help — diese Übersicht\n\n"
+    "📎 Dateien und Fotos einfach hier in den Chat schicken — "
+    "sie landen automatisch in der Ablage (/upload)."
 )
 
 
@@ -223,6 +439,26 @@ def tg_send(text: str, chat_id: str = None):
     while text:
         tg_call("sendMessage", chat_id=cid, text=text[:4000], parse_mode="HTML")
         text = text[4000:]
+
+
+def save_telegram_file(doc: dict, chat_id: str):
+    res = tg_call("getFile", file_id=doc.get("file_id"))
+    if not res or not res.get("ok"):
+        tg_send("❌ Datei konnte nicht abgerufen werden (max. 20 MB).", chat_id)
+        return
+    file_path = res["result"].get("file_path", "")
+    url = f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{file_path}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=90) as r:
+            data = r.read()
+    except Exception as exc:
+        print("[telegram] download:", exc)
+        tg_send("❌ Download fehlgeschlagen.", chat_id)
+        return
+    name = doc.get("file_name") or os.path.basename(file_path) or "datei"
+    stored = store_upload(data, name)
+    size = f"{len(data) / 1048576:.1f} MB" if len(data) > 1048576 else f"{len(data) / 1024:.0f} KB"
+    tg_send(f"✅ <b>Gespeichert:</b> <code>{stored}</code> ({size})\n📍 Ablage: /upload", chat_id)
 
 
 def cmd_status() -> str:
@@ -310,13 +546,39 @@ def cmd_noten(name: str) -> str:
     return "\n".join(lines)
 
 
+def cmd_files() -> str:
+    d = Path(UPLOAD_DIR)
+    if not d.exists() or not any(d.iterdir()):
+        return "📎 Ablage ist leer — schick mir einfach Dateien, um sie abzulegen!"
+    lines = ["📎 <b>Ablage — neueste Dateien</b>", ""]
+    for p in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
+        if not p.is_file():
+            continue
+        st = p.stat()
+        size = f"{st.st_size / 1048576:.1f} MB" if st.st_size > 1048576 else f"{st.st_size / 1024:.0f} KB"
+        dt = datetime.fromtimestamp(st.st_mtime).strftime("%d.%m. %H:%M")
+        lines.append(f"• {p.name} ({size}, {dt})")
+    return "\n".join(lines)
+
+
 def handle_update(upd: dict):
     msg = upd.get("message") or {}
     chat_id = str((msg.get("chat") or {}).get("id") or "")
-    text = (msg.get("text") or "").strip()
-    if not chat_id or not text:
+    if not chat_id:
         return
     if TELEGRAM_CHAT_ID and chat_id != TELEGRAM_CHAT_ID:
+        return
+    text = (msg.get("text") or msg.get("caption") or "").strip()
+    doc = msg.get("document")
+    photo = msg.get("photo")
+    if doc or photo:
+        file_doc = doc or {
+            "file_id": photo[-1]["file_id"],
+            "file_name": f"foto_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg",
+        }
+        save_telegram_file(file_doc, chat_id)
+        return
+    if not text:
         return
     cmd = text.split()[0].split("@")[0].lower()
     if cmd == "/start":
@@ -335,6 +597,8 @@ def handle_update(upd: dict):
         tg_send(cmd_status(), chat_id)
     elif cmd == "/heute":
         tg_send(cmd_heute(), chat_id)
+    elif cmd == "/files":
+        tg_send(cmd_files(), chat_id)
     elif cmd == "/noten":
         parts = text.split(maxsplit=1)
         tg_send(cmd_noten(parts[1] if len(parts) > 1 else ""), chat_id)
