@@ -22,6 +22,9 @@ services:
     networks:
       - highfishNetwork
 
+volumes:
+  schulmanager-data:
+
 networks:
   highfishNetwork:
     external: true
