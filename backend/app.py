@@ -1149,7 +1149,7 @@ def start_background_threads():
         if REMINDER_TIME and TELEGRAM_CHAT_ID:
             threading.Thread(target=reminder_loop, daemon=True, name="tg-reminder").start()
         if TELEGRAM_CHAT_ID:
-            tg_send("✅ trt.Schulmanager-Bot ist verbunden.\n\n" + HELP_TEXT)
+            tg_send("✅ trt.Schulmanager-Bot ist verbunden. Hallo, ich bin da!\n\n" + HELP_TEXT)
 
 
 # Statisches Frontend — nach den API-Routen mounten
