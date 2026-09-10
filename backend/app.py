@@ -2,14 +2,18 @@
 
 - Kompletter App-State als JSON-Dokument in SQLite (Tabelle `state`, einzelne Zeile)
 - Login mit Passwort aus ENV (APP_PASSWORD), Session-Token im RAM
-- Telegram-Integration (reine Standardbibliothek):
+- Schueler-Zugaenge: 6-stelliger Code -> eigenes Ablage-Verzeichnis pro Schueler
+  (Lehrer verwaltet, Schueler sehen nur ihre eigenen Dateien)
+- Telegram-Integration (reine Standardbibliothek, NUR Admin via TELEGRAM_CHAT_ID):
   * Bot-Commands: /start /help /status /heute /noten <Klasse> /files
   * Dateien/Fotos direkt in den Chat schicken -> landen in der Ablage
   * Taegliche Klassenbuch-Erinnerung (Mo-Fr) an TELEGRAM_CHAT_ID
 - Ablage / Upload:
-  * POST /api/upload (Rohbytes, optional UPLOAD_CODE fuer Schueler)
-  * GET /api/files, GET/DELETE /api/files/{name} (Bearer-auth, Lehrer)
-  * GET /upload -> eigenstaendige Upload-Seite (Schueler + Lehrer-Bereich)
+  * POST /api/upload (Rohbytes, optional UPLOAD_CODE fuer Gast-Uploads)
+  * GET /api/files (rekursiv, inkl. Schuelerordner), GET/DELETE /api/files/{pfad} (Lehrer)
+  * POST /api/students (Lehrer): Code + Verzeichnis anlegen
+  * POST /api/slogin + /api/supload + /api/sfiles (Schueler, eigener Ordner)
+  * GET /upload -> Upload-Seite (Schueler-Login, Gast-Upload, Lehrer-Bereich)
 - Statisches Frontend aus /static, WAL-Modus, ein Worker pro Container
 """
 import json
@@ -22,7 +26,7 @@ import urllib.request
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Set
+from typing import Dict, Set
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
@@ -34,13 +38,14 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 REMINDER_TIME = os.environ.get("REMINDER_TIME", "").strip()  # z. B. "17:30", leer = aus
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
-UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()  # leer = Upload ohne Code
+UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()  # leer = Gast-Upload ohne Code
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (Telegram liefert max. 20 MB)
 
 DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
-app = FastAPI(title="trt.Schulmanager API", version="2.2.0")
+app = FastAPI(title="trt.Schulmanager API", version="2.3.0")
 TOKENS: Set[str] = set()
+STUDENT_TOKENS: Dict[str, str] = {}  # token -> 6-stelliger Code
 
 
 @contextmanager
@@ -56,6 +61,17 @@ def db():
                 id         INTEGER PRIMARY KEY CHECK (id = 1),
                 json       TEXT    NOT NULL,
                 updated_at TEXT    NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_access (
+                code       TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                klasse     TEXT NOT NULL,
+                folder     TEXT NOT NULL,
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -146,6 +162,22 @@ def sanitize_filename(name: str) -> str:
     return name[:120]
 
 
+def folder_slug(text: str) -> str:
+    return sanitize_filename(text).replace(" ", "_")
+
+
+def student_dir(klasse: str, name: str) -> Path:
+    return Path(UPLOAD_DIR) / folder_slug(klasse) / folder_slug(name)
+
+
+def resolve_upload_path(rel: str) -> Path:
+    base = Path(UPLOAD_DIR).resolve()
+    p = (base / rel).resolve()
+    if base != p and base not in p.parents:
+        raise HTTPException(status_code=400, detail="Ungültiger Pfad")
+    return p
+
+
 def unique_target(directory: Path, name: str) -> Path:
     candidate = directory / name
     stem, suffix = candidate.stem, candidate.suffix
@@ -156,11 +188,31 @@ def unique_target(directory: Path, name: str) -> Path:
     return candidate
 
 
-def store_upload(data: bytes, name: str) -> str:
-    Path(UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
-    target = unique_target(Path(UPLOAD_DIR), sanitize_filename(name))
+def store_upload_in(directory: Path, data: bytes, name: str) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
+    target = unique_target(directory, sanitize_filename(name))
     target.write_bytes(data)
     return target.name
+
+
+def store_upload(data: bytes, name: str) -> str:
+    return store_upload_in(Path(UPLOAD_DIR), data, name)
+
+
+def list_dir_files(directory: Path) -> list:
+    files = []
+    if directory.exists():
+        for p in sorted(directory.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.is_file():
+                st = p.stat()
+                files.append(
+                    {
+                        "name": p.name,
+                        "size": st.st_size,
+                        "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                    }
+                )
+    return files
 
 
 @app.post("/api/upload")
@@ -178,39 +230,151 @@ async def upload_file(request: Request, filename: str = "", code: str = ""):
 
 @app.get("/api/files", dependencies=[Depends(require_auth)])
 def list_files():
-    d = Path(UPLOAD_DIR)
+    """Rekursive Liste fuer den Lehrer — inkl. aller Schuelerordner."""
+    base = Path(UPLOAD_DIR)
     files = []
-    if d.exists():
-        for p in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if p.is_file():
-                st = p.stat()
-                files.append(
-                    {
-                        "name": p.name,
-                        "size": st.st_size,
-                        "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
-                    }
-                )
+    if base.exists():
+        items = [p for p in base.rglob("*") if p.is_file()]
+        for p in sorted(items, key=lambda x: x.stat().st_mtime, reverse=True):
+            st = p.stat()
+            files.append(
+                {
+                    "name": p.relative_to(base).as_posix(),
+                    "size": st.st_size,
+                    "modified": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(),
+                }
+            )
     return {"files": files}
 
 
-@app.get("/api/files/{name}", dependencies=[Depends(require_auth)])
-def download_file(name: str):
-    safe = sanitize_filename(name)
-    p = Path(UPLOAD_DIR) / safe
+@app.get("/api/files/{rel_path:path}", dependencies=[Depends(require_auth)])
+def download_file(rel_path: str):
+    p = resolve_upload_path(rel_path)
     if not p.is_file():
         raise HTTPException(status_code=404, detail="Datei nicht gefunden")
     return Response(
         content=p.read_bytes(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": 'attachment; filename="' + safe + '"'},
+        headers={"Content-Disposition": 'attachment; filename="' + p.name + '"'},
     )
 
 
-@app.delete("/api/files/{name}", dependencies=[Depends(require_auth)])
-def delete_file(name: str):
-    safe = sanitize_filename(name)
-    p = Path(UPLOAD_DIR) / safe
+@app.delete("/api/files/{rel_path:path}", dependencies=[Depends(require_auth)])
+def delete_file(rel_path: str):
+    p = resolve_upload_path(rel_path)
+    if p.is_file():
+        p.unlink()
+    return {"ok": True}
+
+
+# ============ Schueler-Zugaenge (Lehrer verwaltet) ============
+
+
+@app.post("/api/students", dependencies=[Depends(require_auth)])
+def create_student_access(payload: dict = Body(...)):
+    name = (payload.get("name") or "").strip()
+    klasse = (payload.get("klasse") or "").strip()
+    if not name or not klasse:
+        raise HTTPException(status_code=400, detail="Name und Klasse erforderlich")
+    folder = student_dir(klasse, name)
+    with db() as conn:
+        while True:
+            code = f"{secrets.randbelow(1000000):06d}"
+            if not conn.execute("SELECT 1 FROM student_access WHERE code = ?", (code,)).fetchone():
+                break
+        conn.execute(
+            "INSERT INTO student_access (code, name, klasse, folder, created_at) VALUES (?, ?, ?, ?, ?)",
+            (code, name, klasse, str(folder), utcnow()),
+        )
+    folder.mkdir(parents=True, exist_ok=True)
+    return {"ok": True, "code": code, "name": name, "klasse": klasse, "folder": f"{folder_slug(klasse)}/{folder_slug(name)}"}
+
+
+@app.get("/api/students", dependencies=[Depends(require_auth)])
+def list_student_access():
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT code, name, klasse, folder, created_at FROM student_access ORDER BY klasse, name"
+        ).fetchall()
+    out = []
+    for code, name, klasse, folder, created_at in rows:
+        d = Path(folder)
+        n = len([f for f in d.iterdir() if f.is_file()]) if d.exists() else 0
+        out.append({"code": code, "name": name, "klasse": klasse, "files": n, "created_at": created_at})
+    return {"students": out}
+
+
+@app.delete("/api/students/{code}", dependencies=[Depends(require_auth)])
+def delete_student_access(code: str):
+    with db() as conn:
+        conn.execute("DELETE FROM student_access WHERE code = ?", (code,))
+    STUDENT_TOKENS = {t: c for t, c in STUDENT_TOKENS.items() if c != code}
+    return {"ok": True}
+
+
+# ============ Schueler-Login & eigene Dateien ============
+
+
+def require_student(request: Request) -> dict:
+    auth = request.headers.get("authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    code = STUDENT_TOKENS.get(token)
+    if not code:
+        raise HTTPException(status_code=401, detail="Code ungültig oder abgelaufen")
+    with db() as conn:
+        row = conn.execute(
+            "SELECT name, klasse, folder FROM student_access WHERE code = ?", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Zugang nicht mehr gültig")
+    return {"code": code, "name": row[0], "klasse": row[1], "folder": row[2]}
+
+
+@app.post("/api/slogin")
+def student_login(payload: dict = Body(...)):
+    code = str((payload.get("code") or "")).strip()
+    with db() as conn:
+        row = conn.execute(
+            "SELECT name, klasse, folder FROM student_access WHERE code = ?", (code,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="Ungültiger Code")
+    token = secrets.token_urlsafe(24)
+    STUDENT_TOKENS[token] = code
+    return {"ok": True, "token": token, "name": row[0], "klasse": row[1]}
+
+
+@app.post("/api/supload")
+async def student_upload(request: Request, filename: str = "", st: dict = Depends(require_student)):
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Leere Datei")
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Datei zu gross (max. 25 MB)")
+    name = store_upload_in(Path(st["folder"]), body, filename or "datei")
+    return {"ok": True, "name": name, "size": len(body)}
+
+
+@app.get("/api/sfiles")
+def student_files(st: dict = Depends(require_student)):
+    return {"files": list_dir_files(Path(st["folder"])), "name": st["name"], "klasse": st["klasse"]}
+
+
+@app.get("/api/sfiles/{name}", dependencies=[Depends(require_student)])
+def student_download(name: str, st: dict = Depends(require_student)):
+    p = Path(st["folder"]) / sanitize_filename(name)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+    return Response(
+        content=p.read_bytes(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="' + p.name + '"'},
+    )
+
+
+@app.delete("/api/sfiles/{name}")
+def student_delete(name: str, st: dict = Depends(require_student)):
+    p = Path(st["folder"]) / sanitize_filename(name)
     if p.is_file():
         p.unlink()
     return {"ok": True}
@@ -228,7 +392,7 @@ UPLOAD_PAGE = """<!DOCTYPE html>
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 header{background:#101a2e;color:#fff;padding:14px 16px;font-weight:800;font-size:18px}
 header span{font-weight:400;font-size:12px;color:#94a3b8;margin-left:8px}
-main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+main{max-width:820px;margin:0 auto;padding:20px 16px 60px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
 h2{margin:0 0 4px;font-size:20px}
 p{color:var(--mut);font-size:14px}
@@ -244,34 +408,115 @@ table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{border:1px solid var(--line);padding:6px 9px;text-align:left}
 th{background:#f1f5f9;font-size:12px;text-transform:uppercase;color:#475569}
 .hidden{display:none}
+code.big{font-size:28px;font-weight:800;background:#dbeafe;color:#1e40af;padding:6px 14px;border-radius:8px;letter-spacing:4px}
 </style>
 </head>
 <body>
 <header>📎 trt.Schulmanager <span>Ablage / Upload</span></header>
 <main>
+
 <div class="card">
-<h2>📤 Datei hochladen</h2>
-<p>Dokument auswählen und hochladen — es landet direkt in der Ablage. Alternativ: einfach per Telegram an den Bot schicken.</p>
+<h2>🎓 Schüler-Bereich</h2>
+<p>Mit deinem 6-stelligen Code einloggen — du siehst und verwaltest nur deine eigenen Dateien.</p>
+<label>Dein Code</label><input type="text" id="scode" placeholder="z. B. 483920" autocomplete="off" maxlength="6" inputmode="numeric">
+<button class="btn" onclick="slogin()">Anmelden</button>
+<div id="smsg" class="msg"></div>
+<div id="sWrap" class="hidden">
+<p id="sHello"></p>
+<label>Datei hochladen</label><input type="file" id="sFile">
+<button class="btn ghost" onclick="sUpload()">Hochladen</button>
+<div style="overflow-x:auto"><table id="stable"><thead><tr><th>Datei</th><th>Größe</th><th>Datum</th><th style="width:100px"></th></tr></thead><tbody></tbody></table></div>
+</div>
+</div>
+
+<div class="card">
+<h2>📤 Gast-Upload</h2>
+<p>Direkt in die allgemeine Ablage hochladen (falls vom Lehrer aktiviert).</p>
 <label>Datei</label><input type="file" id="file">
 <label>Zugangscode (falls erforderlich)</label><input type="text" id="code" placeholder="z. B. vom Lehrer erhalten" autocomplete="off">
 <button class="btn" onclick="doUpload()">Hochladen</button>
 <div id="umsg" class="msg"></div>
 </div>
+
 <div class="card">
 <h2>🔐 Lehrer-Bereich</h2>
-<p>Mit dem App-Passwort einloggen, um alle Dateien zu sehen, herunterzuladen oder zu löschen.</p>
+<p>Mit dem App-Passwort einloggen: alle Dateien (inkl. Schülerordner) sehen, herunterladen, löschen — plus Schüler-Zugänge verwalten.</p>
 <label>Passwort</label><input type="password" id="pw" placeholder="App-Passwort">
 <button class="btn ghost" onclick="doLogin()">Anmelden</button>
 <div id="lmsg" class="msg"></div>
-<div id="filesWrap" class="hidden">
+<div id="tWrap" class="hidden">
+
+<div style="border-top:1px solid var(--line);margin:14px 0;padding-top:14px">
+<h2 style="font-size:17px">👥 Schüler-Zugang erstellen</h2>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<div style="flex:1;min-width:140px"><label>Name</label><input type="text" id="stName" placeholder="z. B. Max Mustermann"></div>
+<div style="width:110px"><label>Klasse</label><input type="text" id="stKlasse" placeholder="z. B. 9b"></div>
+<div style="width:100%;"><button class="btn" style="margin-top:26px" onclick="addStudent()">Zugang erstellen</button></div>
+</div>
+<div id="stmsg" class="msg"></div>
+<div style="overflow-x:auto"><table id="stTable"><thead><tr><th>Name</th><th>Klasse</th><th>Code</th><th>Dateien</th><th style="width:60px"></th></tr></thead><tbody></tbody></table></div>
+</div>
+
+<div style="border-top:1px solid var(--line);margin:14px 0;padding-top:14px">
+<h2 style="font-size:17px">📁 Alle Dateien</h2>
 <div style="overflow-x:auto"><table id="ftable"><thead><tr><th>Datei</th><th>Größe</th><th>Datum</th><th style="width:100px"></th></tr></thead><tbody></tbody></table></div>
+</div>
+
 </div>
 </div>
 </main>
 <script>
 var TOKEN = sessionStorage.getItem("lw_token") || null;
+var STOKEN = sessionStorage.getItem("lw_student") || null;
 function msg(id, text, cls){var el = document.getElementById(id); el.textContent = text; el.className = "msg " + cls;}
 function fmtSize(b){return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : (b / 1024).toFixed(0) + " KB";}
+function enc(p){return p.split("/").map(encodeURIComponent).join("/");}
+
+async function slogin(){
+  var code = document.getElementById("scode").value.trim();
+  if(!code){msg("smsg", "Bitte Code eingeben.", "show-err"); return;}
+  try{
+    var r = await fetch("/api/slogin", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({code: code})});
+    if(!r.ok){msg("smsg", "❌ Ungültiger Code", "show-err"); return;}
+    var j = await r.json(); STOKEN = j.token; sessionStorage.setItem("lw_student", STOKEN);
+    loadMyFiles();
+  }catch(e){msg("smsg", "❌ Server nicht erreichbar", "show-err");}
+}
+async function loadMyFiles(){
+  try{
+    var r = await fetch("/api/sfiles", {headers: {Authorization: "Bearer " + STOKEN}});
+    if(r.status === 401){STOKEN = null; sessionStorage.removeItem("lw_student"); msg("smsg", "Code ungültig — neu anmelden", "show-err"); return;}
+    var j = await r.json();
+    document.getElementById("sWrap").classList.remove("hidden");
+    document.getElementById("sHello").innerHTML = "👤 <b>" + j.name + "</b> (" + j.klasse + ") — deine Dateien:";
+    renderTable("#stable tbody", j.files, "s");
+  }catch(e){msg("smsg", "❌ " + e.message, "show-err");}
+}
+async function sUpload(){
+  var f = document.getElementById("sFile").files[0];
+  if(!f){msg("smsg", "Bitte zuerst eine Datei auswählen.", "show-err"); return;}
+  msg("smsg", "Lädt hoch …", "show-ok");
+  try{
+    var buf = await f.arrayBuffer();
+    var r = await fetch("/api/supload?filename=" + encodeURIComponent(f.name), {method: "POST", headers: {Authorization: "Bearer " + STOKEN}, body: buf});
+    var j = await r.json().catch(function(){return {};});
+    if(r.ok){msg("smsg", "✅ Gespeichert: " + (j.name || f.name), "show-ok"); loadMyFiles();}
+    else msg("smsg", "❌ " + (j.detail || "Fehler"), "show-err");
+  }catch(e){msg("smsg", "❌ Upload fehlgeschlagen: " + e.message, "show-err");}
+}
+async function sdl(name){
+  var r = await fetch("/api/sfiles/" + enc(name), {headers: {Authorization: "Bearer " + STOKEN}});
+  if(!r.ok) return;
+  var blob = await r.blob();
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name.split("/").pop(); a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);}, 3000);
+}
+async function sdel(name){
+  if(!confirm("Diese Datei wirklich löschen?")) return;
+  await fetch("/api/sfiles/" + enc(name), {method: "DELETE", headers: {Authorization: "Bearer " + STOKEN}});
+  loadMyFiles();
+}
+
 async function doUpload(){
   var f = document.getElementById("file").files[0];
   if(!f){msg("umsg", "Bitte zuerst eine Datei auswählen.", "show-err"); return;}
@@ -290,43 +535,84 @@ async function doLogin(){
     var r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({password: document.getElementById("pw").value})});
     if(!r.ok){msg("lmsg", "❌ Falsches Passwort", "show-err"); return;}
     var j = await r.json(); TOKEN = j.token; sessionStorage.setItem("lw_token", TOKEN);
-    loadFiles();
+    loadFiles(); loadStudents();
   }catch(e){msg("lmsg", "❌ Server nicht erreichbar", "show-err");}
+}
+function renderTable(sel, files, mode){
+  var tb = document.querySelector(sel); tb.innerHTML = "";
+  if(!files.length){tb.innerHTML = '<tr><td colspan="4" style="color:var(--mut)">Noch keine Dateien.</td></tr>'; return;}
+  files.forEach(function(f){
+    var tr = document.createElement("tr");
+    var td = document.createElement("td"); td.textContent = f.name; tr.appendChild(td);
+    td = document.createElement("td"); td.textContent = fmtSize(f.size); tr.appendChild(td);
+    td = document.createElement("td"); td.textContent = new Date(f.modified).toLocaleString("de-DE"); tr.appendChild(td);
+    td = document.createElement("td");
+    var b1 = document.createElement("button"); b1.className = "btn ghost"; b1.style.cssText = "margin:0;padding:4px 10px;font-size:12px"; b1.textContent = "⬇";
+    b1.onclick = function(){if(mode === "s") sdl(f.name); else dl(f.name);}; td.appendChild(b1);
+    var b2 = document.createElement("button"); b2.className = "btn red"; b2.style.cssText = "margin:0 0 0 4px;padding:4px 10px;font-size:12px"; b2.textContent = "✕";
+    b2.onclick = function(){if(mode === "s") sdel(f.name); else del(f.name);}; td.appendChild(b2);
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  });
 }
 async function loadFiles(){
   try{
     var r = await fetch("/api/files", {headers: {Authorization: "Bearer " + TOKEN}});
     if(r.status === 401){TOKEN = null; sessionStorage.removeItem("lw_token"); msg("lmsg", "Sitzung abgelaufen — neu anmelden", "show-err"); return;}
     var j = await r.json();
-    document.getElementById("filesWrap").classList.remove("hidden");
-    var tb = document.querySelector("#ftable tbody"); tb.innerHTML = "";
-    if(!j.files.length){tb.innerHTML = '<tr><td colspan="4" style="color:var(--mut)">Noch keine Dateien.</td></tr>'; return;}
-    j.files.forEach(function(f){
+    document.getElementById("tWrap").classList.remove("hidden");
+    renderTable("#ftable tbody", j.files, "t");
+  }catch(e){msg("lmsg", "❌ " + e.message, "show-err");}
+}
+async function addStudent(){
+  var name = document.getElementById("stName").value.trim();
+  var klasse = document.getElementById("stKlasse").value.trim();
+  if(!name || !klasse){msg("stmsg", "Name und Klasse eingeben.", "show-err"); return;}
+  try{
+    var r = await fetch("/api/students", {method: "POST", headers: {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"}, body: JSON.stringify({name: name, klasse: klasse})});
+    var j = await r.json().catch(function(){return {};});
+    if(r.ok){msg("stmsg", "✅ Zugang erstellt — Code: " + j.code + " (Ordner: " + j.folder + ")", "show-ok"); loadStudents();}
+    else msg("stmsg", "❌ " + (j.detail || "Fehler"), "show-err");
+  }catch(e){msg("stmsg", "❌ " + e.message, "show-err");}
+}
+async function loadStudents(){
+  try{
+    var r = await fetch("/api/students", {headers: {Authorization: "Bearer " + TOKEN}});
+    var j = await r.json();
+    var tb = document.querySelector("#stTable tbody"); tb.innerHTML = "";
+    if(!j.students.length){tb.innerHTML = '<tr><td colspan="5" style="color:var(--mut)">Noch keine Schüler-Zugänge.</td></tr>'; return;}
+    j.students.forEach(function(s){
       var tr = document.createElement("tr");
-      var td = document.createElement("td"); td.textContent = f.name; tr.appendChild(td);
-      td = document.createElement("td"); td.textContent = fmtSize(f.size); tr.appendChild(td);
-      td = document.createElement("td"); td.textContent = new Date(f.modified).toLocaleString("de-DE"); tr.appendChild(td);
-      td = document.createElement("td");
-      var b1 = document.createElement("button"); b1.className = "btn ghost"; b1.style.cssText = "margin:0;padding:4px 10px;font-size:12px"; b1.textContent = "⬇"; b1.onclick = function(){dl(f.name);}; td.appendChild(b1);
-      var b2 = document.createElement("button"); b2.className = "btn red"; b2.style.cssText = "margin:0 0 0 4px;padding:4px 10px;font-size:12px"; b2.textContent = "✕"; b2.onclick = function(){del(f.name);}; td.appendChild(b2);
+      [s.name, s.klasse].forEach(function(v){var td = document.createElement("td"); td.textContent = v; tr.appendChild(td);});
+      var tdC = document.createElement("td"); var c = document.createElement("code"); c.textContent = s.code; tdC.appendChild(c); tr.appendChild(tdC);
+      var tdF = document.createElement("td"); tdF.textContent = s.files; tr.appendChild(tdF);
+      var td = document.createElement("td");
+      var b = document.createElement("button"); b.className = "btn red"; b.style.cssText = "margin:0;padding:4px 10px;font-size:12px"; b.textContent = "✕";
+      b.onclick = function(){delStudent(s.code);}; td.appendChild(b);
       tr.appendChild(td);
       tb.appendChild(tr);
     });
-  }catch(e){msg("lmsg", "❌ " + e.message, "show-err");}
+  }catch(e){msg("stmsg", "❌ " + e.message, "show-err");}
+}
+async function delStudent(code){
+  if(!confirm("Schüler-Zugang entfernen? Der Ordner mit seinen Dateien bleibt erhalten.")) return;
+  await fetch("/api/students/" + code, {method: "DELETE", headers: {Authorization: "Bearer " + TOKEN}});
+  loadStudents();
 }
 async function dl(name){
-  var r = await fetch("/api/files/" + encodeURIComponent(name), {headers: {Authorization: "Bearer " + TOKEN}});
+  var r = await fetch("/api/files/" + enc(name), {headers: {Authorization: "Bearer " + TOKEN}});
   if(!r.ok) return;
   var blob = await r.blob();
-  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name.split("/").pop(); a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);}, 3000);
 }
 async function del(name){
   if(!confirm("Diese Datei wirklich löschen?")) return;
-  await fetch("/api/files/" + encodeURIComponent(name), {method: "DELETE", headers: {Authorization: "Bearer " + TOKEN}});
+  await fetch("/api/files/" + enc(name), {method: "DELETE", headers: {Authorization: "Bearer " + TOKEN}});
   loadFiles();
 }
-if(TOKEN) loadFiles();
+if(TOKEN){loadFiles(); loadStudents();}
+if(STOKEN) loadMyFiles();
 </script>
 </body>
 </html>
@@ -402,7 +688,7 @@ def week_key_today() -> str:
     return f"{iso[0]}-{iso[1]:02d}"
 
 
-# ============ Telegram ============
+# ============ Telegram (nur Admin via TELEGRAM_CHAT_ID) ============
 
 HELP_TEXT = (
     "🤖 <b>trt.Schulmanager-Bot</b>\n\n"
@@ -412,7 +698,8 @@ HELP_TEXT = (
     "/files — neueste Dateien in der Ablage\n"
     "/help — diese Übersicht\n\n"
     "📎 Dateien und Fotos einfach hier in den Chat schicken — "
-    "sie landen automatisch in der Ablage (/upload)."
+    "sie landen automatisch in der Ablage.\n\n"
+    "🔒 Dieser Bot antwortet ausschließlich dem Admin."
 )
 
 
@@ -551,13 +838,13 @@ def cmd_files() -> str:
     if not d.exists() or not any(d.iterdir()):
         return "📎 Ablage ist leer — schick mir einfach Dateien, um sie abzulegen!"
     lines = ["📎 <b>Ablage — neueste Dateien</b>", ""]
-    for p in sorted(d.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
-        if not p.is_file():
-            continue
+    items = [p for p in d.rglob("*") if p.is_file()]
+    for p in sorted(items, key=lambda x: x.stat().st_mtime, reverse=True)[:10]:
         st = p.stat()
         size = f"{st.st_size / 1048576:.1f} MB" if st.st_size > 1048576 else f"{st.st_size / 1024:.0f} KB"
         dt = datetime.fromtimestamp(st.st_mtime).strftime("%d.%m. %H:%M")
-        lines.append(f"• {p.name} ({size}, {dt})")
+        rel = p.relative_to(d).as_posix()
+        lines.append(f"• {rel} ({size}, {dt})")
     return "\n".join(lines)
 
 
