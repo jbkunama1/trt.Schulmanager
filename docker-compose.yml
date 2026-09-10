@@ -11,6 +11,12 @@ services:
     environment:
       # Login-Passwort der Web-App — in Portainer anpassen!
       - APP_PASSWORD=lehrer2026
+      # 🤖 Telegram-Bot (Token von @BotFather; leer lassen = Telegram deaktiviert)
+      - TELEGRAM_BOT_TOKEN=
+      # Deine Chat-ID (erhältst du per /start vom Bot; leer = Bot antwortet jedem mit dessen ID)
+      - TELEGRAM_CHAT_ID=
+      # ⏰ Tägliche Klassenbuch-Erinnerung Mo–Fr, z. B. 17:30 (leer = Erinnerung deaktiviert)
+      - REMINDER_TIME=17:30
     restart: unless-stopped
 
 volumes:
