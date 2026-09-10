@@ -3,17 +3,10 @@
 - Kompletter App-State als JSON-Dokument in SQLite (Tabelle `state`, einzelne Zeile)
 - Login mit Passwort aus ENV (APP_PASSWORD), Session-Token im RAM
 - Schueler-Zugaenge: 6-stelliger Code -> eigenes Ablage-Verzeichnis pro Schueler
-  (Lehrer verwaltet, Schueler sehen nur ihre eigenen Dateien)
-- Telegram-Integration (reine Standardbibliothek, NUR Admin via TELEGRAM_CHAT_ID):
-  * Bot-Commands: /start /help /status /heute /noten <Klasse> /files
-  * Dateien/Fotos direkt in den Chat schicken -> landen in der Ablage
-  * Taegliche Klassenbuch-Erinnerung (Mo-Fr) an TELEGRAM_CHAT_ID
-- Ablage / Upload:
-  * POST /api/upload (Rohbytes, optional UPLOAD_CODE fuer Gast-Uploads)
-  * GET /api/files (rekursiv, inkl. Schuelerordner), GET/DELETE /api/files/{pfad} (Lehrer)
-  * POST /api/students (Lehrer): Code + Verzeichnis anlegen
-  * POST /api/slogin + /api/supload + /api/sfiles (Schueler, eigener Ordner)
-  * GET /upload -> Upload-Seite (Schueler-Login, Gast-Upload, Lehrer-Bereich)
+  * Einzel-Anlage (Name + Klasse) ODER Massen-Anlage (Klassenliste, ein Name pro Zeile)
+  * Bereits vorhandene Schueler werden erkannt und uebersprungen
+- Telegram-Integration (reine Standardbibliothek, NUR Admin via TELEGRAM_CHAT_ID)
+- Ablage / Upload: Gaeste, Schueler (eigener Ordner), Lehrer (rekursiv)
 - Statisches Frontend aus /static, WAL-Modus, ein Worker pro Container
 """
 import json
@@ -40,10 +33,11 @@ REMINDER_TIME = os.environ.get("REMINDER_TIME", "").strip()  # z. B. "17:30", le
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
 UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()  # leer = Gast-Upload ohne Code
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (Telegram liefert max. 20 MB)
+MAX_BULK_STUDENTS = 60  # pro Massen-Anlage
 
 DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
-app = FastAPI(title="trt.Schulmanager API", version="2.3.0")
+app = FastAPI(title="trt.Schulmanager API", version="2.4.0")
 TOKENS: Set[str] = set()
 STUDENT_TOKENS: Dict[str, str] = {}  # token -> 6-stelliger Code
 
@@ -270,24 +264,77 @@ def delete_file(rel_path: str):
 # ============ Schueler-Zugaenge (Lehrer verwaltet) ============
 
 
+def create_access(conn, name: str, klasse: str) -> dict:
+    """Legt einen Zugang an (falls es ihn nicht schon gibt) und gibt das Ergebnis zurueck."""
+    folder = student_dir(klasse, name)
+    exists = conn.execute(
+        "SELECT code FROM student_access WHERE folder = ?", (str(folder),)
+    ).fetchone()
+    if exists:
+        return {"name": name, "klasse": klasse, "code": exists[0], "skip": True}
+    while True:
+        code = f"{secrets.randbelow(1000000):06d}"
+        if not conn.execute("SELECT 1 FROM student_access WHERE code = ?", (code,)).fetchone():
+            break
+    conn.execute(
+        "INSERT INTO student_access (code, name, klasse, folder, created_at) VALUES (?, ?, ?, ?, ?)",
+        (code, name, klasse, str(folder), utcnow()),
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    return {
+        "name": name,
+        "klasse": klasse,
+        "code": code,
+        "folder": f"{folder_slug(klasse)}/{folder_slug(name)}",
+        "skip": False,
+    }
+
+
 @app.post("/api/students", dependencies=[Depends(require_auth)])
 def create_student_access(payload: dict = Body(...)):
     name = (payload.get("name") or "").strip()
     klasse = (payload.get("klasse") or "").strip()
     if not name or not klasse:
         raise HTTPException(status_code=400, detail="Name und Klasse erforderlich")
-    folder = student_dir(klasse, name)
     with db() as conn:
-        while True:
-            code = f"{secrets.randbelow(1000000):06d}"
-            if not conn.execute("SELECT 1 FROM student_access WHERE code = ?", (code,)).fetchone():
-                break
-        conn.execute(
-            "INSERT INTO student_access (code, name, klasse, folder, created_at) VALUES (?, ?, ?, ?, ?)",
-            (code, name, klasse, str(folder), utcnow()),
+        result = create_access(conn, name, klasse)
+    return {"ok": True, **result}
+
+
+@app.post("/api/students/bulk", dependencies=[Depends(require_auth)])
+def create_student_access_bulk(payload: dict = Body(...)):
+    """Massen-Anlage: Klassenliste (ein Name pro Zeile, auch Semikolon/Komma getrennt)."""
+    klasse = (payload.get("klasse") or "").strip()
+    names_raw = payload.get("names") or ""
+    if not klasse:
+        raise HTTPException(status_code=400, detail="Klasse erforderlich")
+    names = [
+        n.strip()
+        for n in names_raw.replace(";", "\n").replace(",", "\n").split("\n")
+        if n.strip()
+    ]
+    # Duplikate innerhalb der Liste entfernen
+    seen = set()
+    names = [n for n in names if not (n in seen or seen.add(n))]
+    if not names:
+        raise HTTPException(status_code=400, detail="Keine Namen gefunden")
+    if len(names) > MAX_BULK_STUDENTS:
+        raise HTTPException(
+            status_code=400, detail=f"Max. {MAX_BULK_STUDENTS} Schüler pro Aufruf"
         )
-    folder.mkdir(parents=True, exist_ok=True)
-    return {"ok": True, "code": code, "name": name, "klasse": klasse, "folder": f"{folder_slug(klasse)}/{folder_slug(name)}"}
+    created = []
+    with db() as conn:
+        for name in names:
+            created.append(create_access(conn, name, klasse))
+    new = [c for c in created if not c["skip"]]
+    skipped = len(created) - len(new)
+    return {
+        "ok": True,
+        "created": created,
+        "new": len(new),
+        "skipped": skipped,
+        "klasse": klasse,
+    }
 
 
 @app.get("/api/students", dependencies=[Depends(require_auth)])
@@ -360,7 +407,7 @@ def student_files(st: dict = Depends(require_student)):
     return {"files": list_dir_files(Path(st["folder"])), "name": st["name"], "klasse": st["klasse"]}
 
 
-@app.get("/api/sfiles/{name}", dependencies=[Depends(require_student)])
+@app.get("/api/sfiles/{name}")
 def student_download(name: str, st: dict = Depends(require_student)):
     p = Path(st["folder"]) / sanitize_filename(name)
     if not p.is_file():
@@ -397,7 +444,8 @@ main{max-width:820px;margin:0 auto;padding:20px 16px 60px}
 h2{margin:0 0 4px;font-size:20px}
 p{color:var(--mut);font-size:14px}
 label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px;font-weight:600}
-input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit}
+textarea{resize:vertical;min-height:110px}
 .btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px}
 .btn.ghost{background:var(--card);color:var(--acc);border:1px solid var(--acc)}
 .btn.red{background:var(--red)}
@@ -408,7 +456,7 @@ table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{border:1px solid var(--line);padding:6px 9px;text-align:left}
 th{background:#f1f5f9;font-size:12px;text-transform:uppercase;color:#475569}
 .hidden{display:none}
-code.big{font-size:28px;font-weight:800;background:#dbeafe;color:#1e40af;padding:6px 14px;border-radius:8px;letter-spacing:4px}
+code{background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:6px;font-weight:700}
 </style>
 </head>
 <body>
@@ -447,13 +495,23 @@ code.big{font-size:28px;font-weight:800;background:#dbeafe;color:#1e40af;padding
 <div id="tWrap" class="hidden">
 
 <div style="border-top:1px solid var(--line);margin:14px 0;padding-top:14px">
-<h2 style="font-size:17px">👥 Schüler-Zugang erstellen</h2>
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+<h2 style="font-size:17px">👥 Schüler-Zugänge</h2>
+<button class="btn ghost" style="margin:0;padding:6px 12px;font-size:13px" onclick="exportCsv()">📥 Codes als CSV</button>
+</div>
+
 <div style="display:flex;gap:8px;flex-wrap:wrap">
 <div style="flex:1;min-width:140px"><label>Name</label><input type="text" id="stName" placeholder="z. B. Max Mustermann"></div>
 <div style="width:110px"><label>Klasse</label><input type="text" id="stKlasse" placeholder="z. B. 9b"></div>
-<div style="width:100%;"><button class="btn" style="margin-top:26px" onclick="addStudent()">Zugang erstellen</button></div>
 </div>
+<button class="btn" onclick="addStudent()">Einzelnen Zugang erstellen</button>
+
+<label style="margin-top:16px">Massen-Anlage — ein Name pro Zeile (Komma/Semikolon geht auch)</label>
+<textarea id="bulkNames" placeholder="Max Mustermann&#10;Lisa Klein&#10;Jan Weber&#10;…"></textarea>
+<button class="btn" onclick="bulkStudents()">Alle Zugänge erstellen</button>
+
 <div id="stmsg" class="msg"></div>
+<div id="bulkmsg" class="msg"></div>
 <div style="overflow-x:auto"><table id="stTable"><thead><tr><th>Name</th><th>Klasse</th><th>Code</th><th>Dateien</th><th style="width:60px"></th></tr></thead><tbody></tbody></table></div>
 </div>
 
@@ -468,6 +526,7 @@ code.big{font-size:28px;font-weight:800;background:#dbeafe;color:#1e40af;padding
 <script>
 var TOKEN = sessionStorage.getItem("lw_token") || null;
 var STOKEN = sessionStorage.getItem("lw_student") || null;
+var STUDENTS = [];
 function msg(id, text, cls){var el = document.getElementById(id); el.textContent = text; el.className = "msg " + cls;}
 function fmtSize(b){return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : (b / 1024).toFixed(0) + " KB";}
 function enc(p){return p.split("/").map(encodeURIComponent).join("/");}
@@ -571,17 +630,34 @@ async function addStudent(){
   try{
     var r = await fetch("/api/students", {method: "POST", headers: {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"}, body: JSON.stringify({name: name, klasse: klasse})});
     var j = await r.json().catch(function(){return {};});
-    if(r.ok){msg("stmsg", "✅ Zugang erstellt — Code: " + j.code + " (Ordner: " + j.folder + ")", "show-ok"); loadStudents();}
+    if(r.ok){msg("stmsg", "✅ Zugang erstellt — Code: " + j.code, "show-ok"); document.getElementById("stName").value = ""; loadStudents();}
     else msg("stmsg", "❌ " + (j.detail || "Fehler"), "show-err");
   }catch(e){msg("stmsg", "❌ " + e.message, "show-err");}
+}
+async function bulkStudents(){
+  var klasse = document.getElementById("stKlasse").value.trim();
+  var names = document.getElementById("bulkNames").value;
+  if(!klasse){msg("bulkmsg", "Bitte Klasse eingeben (Feld oben).", "show-err"); return;}
+  if(!names.trim()){msg("bulkmsg", "Bitte Namen eingeben.", "show-err"); return;}
+  msg("bulkmsg", "Erstelle Zugänge …", "show-ok");
+  try{
+    var r = await fetch("/api/students/bulk", {method: "POST", headers: {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"}, body: JSON.stringify({klasse: klasse, names: names})});
+    var j = await r.json().catch(function(){return {};});
+    if(!r.ok){msg("bulkmsg", "❌ " + (j.detail || "Fehler"), "show-err"); return;}
+    var skippedTxt = j.skipped ? ", " + j.skipped + " bereits vorhanden (übersprungen)" : "";
+    msg("bulkmsg", "✅ " + j.new + " Zugänge erstellt" + skippedTxt + " — Codes stehen in der Tabelle / als CSV.", "show-ok");
+    document.getElementById("bulkNames").value = "";
+    loadStudents();
+  }catch(e){msg("bulkmsg", "❌ " + e.message, "show-err");}
 }
 async function loadStudents(){
   try{
     var r = await fetch("/api/students", {headers: {Authorization: "Bearer " + TOKEN}});
     var j = await r.json();
+    STUDENTS = j.students;
     var tb = document.querySelector("#stTable tbody"); tb.innerHTML = "";
-    if(!j.students.length){tb.innerHTML = '<tr><td colspan="5" style="color:var(--mut)">Noch keine Schüler-Zugänge.</td></tr>'; return;}
-    j.students.forEach(function(s){
+    if(!STUDENTS.length){tb.innerHTML = '<tr><td colspan="5" style="color:var(--mut)">Noch keine Schüler-Zugänge.</td></tr>'; return;}
+    STUDENTS.forEach(function(s){
       var tr = document.createElement("tr");
       [s.name, s.klasse].forEach(function(v){var td = document.createElement("td"); td.textContent = v; tr.appendChild(td);});
       var tdC = document.createElement("td"); var c = document.createElement("code"); c.textContent = s.code; tdC.appendChild(c); tr.appendChild(tdC);
@@ -593,6 +669,15 @@ async function loadStudents(){
       tb.appendChild(tr);
     });
   }catch(e){msg("stmsg", "❌ " + e.message, "show-err");}
+}
+function exportCsv(){
+  if(!STUDENTS.length){return;}
+  var csv = "\uFEFFCode;Name;Klasse;Dateien\r\n";
+  STUDENTS.forEach(function(s){csv += s.code + ";" + s.name + ";" + s.klasse + ";" + s.files + "\r\n";});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+  a.download = "schueler-codes.csv"; a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);}, 3000);
 }
 async function delStudent(code){
   if(!confirm("Schüler-Zugang entfernen? Der Ordner mit seinen Dateien bleibt erhalten.")) return;
