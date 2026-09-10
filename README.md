@@ -12,11 +12,11 @@
 [![Frontend](https://img.shields.io/badge/Frontend-HTML%20%7C%20CSS%20%7C%20JavaScript-3b82f6?style=for-the-badge&logo=javascript)](https://github.com/jbkunama1/trt.Schulmanager)
 [![Backend](https://img.shields.io/badge/Backend-Python%20%7C%20FastAPI-3776ab?style=for-the-badge&logo=python)](https://github.com/jbkunama1/trt.Schulmanager)
 [![Datenbank](https://img.shields.io/badge/Datenbank-SQLite-003B57?style=for-the-badge&logo=sqlite)](https://github.com/jbkunama1/trt.Schulmanager)
-[![Deploy](https://img.shields.io/badge/Deploy-Docker-2496ED?style=for-the-badge&logo=docker)](#-deployment)
+[![GHCR](https://img.shields.io/badge/GHCR-Container-2496ED?style=for-the-badge&logo=github)](https://github.com/jbkunama1/trt.Schulmanager/pkgs/container/trt.schulmanager)
 [![Themes](https://img.shields.io/badge/Themes-11%20St%C3%BCcke-e879f9?style=for-the-badge&logo=stylelint)](#-themes)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-a855f7?style=for-the-badge&logo=open-source-initiative)](./LICENSE)
 
-[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [🧩 Module](#-module) · [🎨 Themes](#-themes)
+[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [📦 Portainer-Deploy](#-portainer-deploy-aus-github-empfohlen) · [🧩 Module](#-module) · [🎨 Themes](#-themes)
 
 </div>
 
@@ -30,7 +30,7 @@
 |---|---|
 | [`trt.Klassenbuch`](https://github.com/jbkunama1/trt.Klassenbuch) | 📖 Wochen-Klassenbuch (KW-Navigation, Fach/LK/Thema/Hausaufgabe/Bemerkung), 🗓️ Wochenreflexionen, 📋 Klassenlisten, 🧭 Stoffverteilung, 📚 UVP/Beobachtung/Reflexion |
 | [`trt.Schuelermanager`](https://github.com/jbkunama1/trt.Schuelermanager) | 👥 Schülerprofile mit 📷 Foto, 🏷️ Besonderheiten, ⭐ Sozialpunkten, 📊 Statistik-Dashboard |
-| `Notenwerk` | 🧮 Notenschlüssel (IHK, KMK 15–0, linear), 🔑 Schlüssel-Generator (16 Stufen, Sockel), 📝 Notenmatrix mit Gewichtung & Overrides, 🎓 automatische Zeugnisnote, 📈 Durchschnittsrechner |
+| `Notenwerk` (Nachbau der „Notenrechner"-App) | 🧮 Notenschlüssel (IHK, KMK 15–0, linear), 🔑 Schlüssel-Generator (16 Stufen, Sockel), 📝 Notenmatrix mit Gewichtung & Overrides, 🎓 automatische Zeugnisnote, 📈 Durchschnittsrechner |
 
 **✅ Verbessert gegenüber den Originalen:** echte SQLite-Persistenz (statt Nur-im-Speicher), serverseitiges Login mit ENV-Passwort (statt hardcoded im JavaScript), korrekte ISO-8601-Kalenderwochen, Autosave mit Multi-Device-Sync, 🎨 **11 Themes** im Admin-Bereich.
 
@@ -70,14 +70,19 @@ trt.Schulmanager/
 │   ├── app.py                     # ⚙️ FastAPI: Login, State-API, SQLite
 │   └── requirements.txt           # 🐍 fastapi, uvicorn
 ├── Dockerfile                     # 🐳 python:3.12-slim + Healthcheck
-├── docker-compose.yml             # 🚀 Port 8086, Volume, APP_PASSWORD
+├── docker-compose.yml             # 🚀 GHCR-Image, Port 8086, Volume, APP_PASSWORD
 ├── .github/workflows/
-│   └── deploy-pages.yml           # 📄 GitHub-Pages-Deployment
+│   ├── build-and-push.yml         # 🐳 Build & Push nach GHCR + Trivy-Scan
+│   └── deploy-pages.yml           # 📄 GitHub-Pages-Deployment (Live-Demo)
 ├── docs/
 │   └── banner.svg                 # 🎨 README-Banner
 ├── LICENSE                        # 📄 MIT
 └── README.md
 ```
+
+- **⚙️ CI/CD (GitHub Actions):**
+  - **`build-and-push.yml`** — baut bei jedem Push auf `main` (und bei `v*`-Tags) das Docker-Image und pusht es nach **GHCR**: `ghcr.io/jbkunama1/trt.schulmanager` mit den Tags `latest`, `main`, `vX.Y.Z` und Commit-SHA. Danach läuft automatisch ein **Trivy-Security-Scan**.
+  - **`deploy-pages.yml`** — deployt die statische Live-Demo auf GitHub Pages.
 
 - **🔌 API:**
 
@@ -115,19 +120,57 @@ trt.Schulmanager/
 
 ## 🚀 Deployment
 
-### 🐳 Docker (alle Funktionen — empfohlen)
+### 📦 Portainer-Deploy aus GitHub (empfohlen)
 
-```bash
-git clone https://github.com/jbkunama1/trt.Schulmanager.git
-cd trt.Schulmanager
+Der Stack nutzt das **fertige GHCR-Image** — auf dem Server wird nichts gebaut, nur gezogen:
 
-# ✏️ Passwort in docker-compose.yml anpassen (APP_PASSWORD)
-docker compose up -d --build
+1. **GHCR-Package einmalig öffentlich stellen** (sonst kann Portainer ohne Login nicht ziehen):
+   Profil → **Packages** → `trt.schulmanager` → *Package settings* → *Change visibility* → **Public**
+2. **Portainer** → *Stacks* → **+ Add stack**
+   - **Name:** `trt-schulmanager`
+   - **Build method:** 🗂️ *Repository*
+   - **Repository URL:** `https://github.com/jbkunama1/trt.Schulmanager.git`
+   - **Compose path:** `docker-compose.yml`
+   - *(Optional unter Advanced → Environment variables: `APP_PASSWORD=dein-geheimes-passwort`)*
+3. **Deploy the stack** 🚀
 
-curl -f http://localhost:8086/api/health   # → {"status":"ok"}
+> 🔄 Jeder Push auf `main` baut automatisch ein neues `latest`-Image via GitHub Actions — in Portainer dann einfach *Stacks → trt-schulmanager → Pull and redeploy*.
+
+**Der Inhalt der `docker-compose.yml` im Überblick:**
+
+```yaml
+services:
+  schulmanager:
+    image: ghcr.io/jbkunama1/trt.schulmanager:latest
+    container_name: trt-schulmanager
+    ports:
+      - "8086:8080"
+    volumes:
+      - schulmanager-data:/data
+    environment:
+      - APP_PASSWORD=lehrer2026   # ⚠️ anpassen!
+    restart: unless-stopped
 ```
 
-Danach erreichbar unter `http://<server-ip>:8086`. Die SQLite-Datenbank liegt im Docker-Volume `schulmanager-data` und überlebt Updates & Neustarts.
+Danach erreichbar unter `http://<server-ip>:8086`. Die SQLite-Datenbank liegt im Volume `schulmanager-data` und überlebt Updates & Neustarts.
+
+### 🐳 Docker ohne Portainer
+
+```bash
+# Variante A: GHCR-Image ziehen (kein Build nötig)
+docker run -d --name trt-schulmanager \
+  -p 8086:8080 \
+  -v trt-schulmanager-data:/data \
+  -e APP_PASSWORD="dein-passwort" \
+  --restart unless-stopped \
+  ghcr.io/jbkunama1/trt.schulmanager:latest
+
+# Variante B: selbst bauen
+ git clone https://github.com/jbkunama1/trt.Schulmanager.git
+ cd trt.Schulmanager
+ docker build -t trt-schulmanager .
+ docker run -d --name trt-schulmanager -p 8086:8080 -v trt-schulmanager-data:/data -e APP_PASSWORD="dein-passwort" --restart unless-stopped trt-schulmanager
+```
 
 **💾 Datenbank sichern:**
 
@@ -186,7 +229,7 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 - 🧱 **Frontend:** HTML5, CSS3 (Custom Properties für 11 Themes), Vanilla JavaScript (ES6) — keine Build-Pipeline, keine externen Abhängigkeiten
 - ⚙️ **Backend:** Python 3.12, FastAPI, uvicorn
 - 💾 **Datenbank:** SQLite (Standardbibliothek, WAL-Modus)
-- 🐳 **Deployment:** Docker (python:3.12-slim), docker-compose, Healthcheck
+- 🐳 **Deployment:** GHCR-Image via GitHub Actions (Buildx + metadata-action + Trivy-Scan), Portainer-Stack oder docker run, Healthcheck
 - 📄 **Demo:** GitHub Pages via GitHub Actions
 
 ---

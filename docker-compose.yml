@@ -1,13 +1,15 @@
 services:
   schulmanager:
-    build: .
+    image: ghcr.io/jbkunama1/trt.schulmanager:latest
+    # Alternative für lokale Builds (ohne GHCR) — image-Zeile auskommentieren:
+    # build: .
     container_name: trt-schulmanager
     ports:
       - "8086:8080"
     volumes:
       - schulmanager-data:/data
     environment:
-      # Login-Passwort der Web-App — nach Belieben ändern
+      # Login-Passwort der Web-App — in Portainer anpassen!
       - APP_PASSWORD=lehrer2026
     restart: unless-stopped
 
