@@ -14,9 +14,10 @@
 [![Datenbank](https://img.shields.io/badge/Datenbank-SQLite-003B57?style=for-the-badge&logo=sqlite)](https://github.com/jbkunama1/trt.Schulmanager)
 [![GHCR](https://img.shields.io/badge/GHCR-Container-2496ED?style=for-the-badge&logo=github)](https://github.com/jbkunama1/trt.Schulmanager/pkgs/container/trt.schulmanager)
 [![Themes](https://img.shields.io/badge/Themes-11%20St%C3%BCcke-e879f9?style=for-the-badge&logo=stylelint)](#-themes)
+[![Telegram](https://img.shields.io/badge/Telegram-Bot%20%E2%9C%95-26A5E4?style=for-the-badge&logo=telegram)](#-telegram-integration)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-a855f7?style=for-the-badge&logo=open-source-initiative)](./LICENSE)
 
-[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [📦 Portainer-Deploy](#-portainer-deploy-aus-github-empfohlen) · [🧩 Module](#-module) · [🎨 Themes](#-themes)
+[🌐 Live-Demo](https://jbkunama1.github.io/trt.Schulmanager/) · [🚀 Deployment](#-deployment) · [📦 Portainer-Deploy](#-portainer-deploy-aus-github-empfohlen) · [🤖 Telegram](#-telegram-integration) · [🎨 Themes](#-themes)
 
 </div>
 
@@ -24,7 +25,7 @@
 
 ## 🌈 Was ist trt.Schulmanager?
 
-`trt.Schulmanager` ist die **Fusion aus drei bewährten Lehrer-Apps** — entwickelt für den echten Unterrichtsalltag an der Realschule (Sport, Technik, WBS, Informatik, Medienbildung). Eine einzige Web-App für **Planung, Dokumentation, Schülerverwaltung und Noten** — mobilfreundlich, selbst gehostet, datenschutzfreundlich.
+`trt.Schulmanager` ist die **Fusion aus drei bewährten Lehrer-Apps** — entwickelt für den echten Unterrichtsalltag an der Realschule (Sport, Technik, WBS, Informatik, Medienbildung). Eine einzige Web-App für **Planung, Dokumentation, Schülerverwaltung und Noten** — mobilfreundlich (Mobile-First!), selbst gehostet, datenschutzfreundlich.
 
 | 🔀 Vorgänger-Projekt | 🎁 Eingebrachte Module |
 |---|---|
@@ -32,7 +33,7 @@
 | [`trt.Schuelermanager`](https://github.com/jbkunama1/trt.Schuelermanager) | 👥 Schülerprofile mit 📷 Foto, 🏷️ Besonderheiten, ⭐ Sozialpunkten, 📊 Statistik-Dashboard |
 | `Notenwerk` (Nachbau der „Notenrechner"-App) | 🧮 Notenschlüssel (IHK, KMK 15–0, linear), 🔑 Schlüssel-Generator (16 Stufen, Sockel), 📝 Notenmatrix mit Gewichtung & Overrides, 🎓 automatische Zeugnisnote, 📈 Durchschnittsrechner |
 
-**✅ Verbessert gegenüber den Originalen:** echte SQLite-Persistenz (statt Nur-im-Speicher), serverseitiges Login mit ENV-Passwort (statt hardcoded im JavaScript), korrekte ISO-8601-Kalenderwochen, Autosave mit Multi-Device-Sync, 🎨 **11 Themes** im Admin-Bereich.
+**✅ Verbessert gegenüber den Originalen:** echte SQLite-Persistenz, serverseitiges Login mit ENV-Passwort, korrekte ISO-8601-Kalenderwochen, Autosave mit Multi-Device-Sync, 🎨 11 Themes im Admin-Bereich, 📱 Mobile-First-Ansicht, 🤖 Telegram-Bot.
 
 ---
 
@@ -49,15 +50,51 @@
 | 🎛️ **Admin** | Theme-Galerie (11 Themes, serverweit für alle Geräte), Stunden-pro-Tag, Sicherheitshinweise |
 | 💾 **Backup** | JSON-Export/Import, Server-Löschung, Sync-Statusanzeige |
 
+📱 **Mobile-First:** Auf dem Handy werden Klassenbuchzeilen zu antippbaren Karten, die Notenmatrix behält die Namensspalte sticky, Modals öffnen als Bottom-Sheets (inkl. iOS-Safe-Area), 16px-Inputs verhindern iOS-Zoom, 44px-Touch-Targets, Statusleiste färbt sich pro Theme.
+
+---
+
+## 🤖 Telegram-Integration
+
+Der eingebaute Bot (reine Python-Standardbibliothek, keine Zusatz-Dependencies) holt sich die Daten direkt aus der SQLite-Datenbank des Containers und antwortet **ausschließlich deiner Chat-ID**.
+
+### Setup (5 Minuten)
+
+1. **Bot erstellen:** In Telegram an [@BotFather](https://t.me/BotFather) `/newbot` senden → Namen wählen → **Token kopieren**
+2. **ENV setzen:** Im Portainer-Stack (oder docker run) die Umgebungsvariablen eintragen:
+   - `TELEGRAM_BOT_TOKEN` = Token vom BotFather
+   - `TELEGRAM_CHAT_ID` = erstmal **leer lassen**
+   - `REMINDER_TIME` = z. B. `17:30` (oder leer = keine Erinnerung)
+3. **Container neu starten**, dann dem eigenen Bot **/start** senden → er antwortet mit deiner **Chat-ID**
+4. **Chat-ID als `TELEGRAM_CHAT_ID`** eintragen → nochmal neu starten. Fertig! ✅
+
+> Ohne gesetztes `TELEGRAM_BOT_TOKEN` ist die Integration komplett deaktiviert — null Overhead.
+
+### Commands
+
+| Befehl | Antwort |
+|---|---|
+| `/status` | 📊 Dashboard-Kennzahlen: Klassen, Schüler, Wocheneinträge, erfasste Noten, aktive Einheiten |
+| `/heute` | 📖 Heutige Klassenbuchstunden (Fach, Thema, Hausaufgabe) — oder die Aufforderung, endlich einzutragen 😉 |
+| `/noten 9b` | 🎓 Zeugnisnoten der Klasse (gewichteter Schnitt je Schüler, inkl. ≈ Notenpunkte 15–0) — die Notenschlüssel-Logik (IHK/KMK/linear/Sockel) ist 1:1 ins Backend portiert |
+| `/help` | Befehlsübersicht |
+
+### ⏰ Tägliche Erinnerung
+
+Mo–Fr zur `REMINDER_TIME` prüft der Bot, ob für den heutigen Tag Klassenbucheinträge fehlen — wenn ja, kriegst du eine Nachricht. Schon eingetragen? Bleibt dein Handy still.
+
+> 🛡️ Datenschutz: Der Bot nutzt nur ausgehende Verbindungen zur Telegram-API (Long-Polling) — keine eingehenden Ports, keine Webhook-URL nötig, kein Cloud-Dienst von Drittanbietern.
+
 ---
 
 ## 🏗️ Architektur
 
 ```mermaid
 graph LR
-    B["🌐 Browser (index.html)<br/>vanilla HTML/CSS/JS"] -->|"POST /api/login 🔐"| A["⚙️ FastAPI (app.py)<br/>Port 8080"]
+    B["🌐 Browser (index.html)<br/>Mobile-First"] -->|"POST /api/login 🔐"| A["⚙️ FastAPI (app.py)<br/>Port 8080"]
     B -->|"Autosave 700 ms<br/>GET/PUT/DELETE /api/state"| A
     A --> S[("💾 SQLite<br/>/data/schulmanager.db<br/>WAL-Modus")]
+    T["🤖 Telegram"] <-->|"Long-Polling (out)"| A
     A -->|"statisch aus /static"| B
 ```
 
@@ -65,12 +102,12 @@ graph LR
 
 ```text
 trt.Schulmanager/
-├── index.html                     # 🌐 Komplette App (alle 8 Module, 11 Themes)
+├── index.html                     # 🌐 Komplette App (8 Module, 11 Themes, Mobile-First)
 ├── backend/
-│   ├── app.py                     # ⚙️ FastAPI: Login, State-API, SQLite
-│   └── requirements.txt           # 🐍 fastapi, uvicorn
+│   ├── app.py                     # ⚙️ FastAPI: Login, State-API, SQLite, Telegram-Bot
+│   └── requirements.txt           # 🐍 fastapi, uvicorn (Telegram = reine stdlib!)
 ├── Dockerfile                     # 🐳 python:3.12-slim + Healthcheck
-├── docker-compose.yml             # 🚀 GHCR-Image, Port 8086, Volume, APP_PASSWORD
+├── docker-compose.yml             # 🚀 GHCR-Image, Port 8086, Volume, ENVs (App + Telegram)
 ├── .github/workflows/
 │   ├── build-and-push.yml         # 🐳 Build & Push nach GHCR + Trivy-Scan
 │   └── deploy-pages.yml           # 📄 GitHub-Pages-Deployment (Live-Demo)
@@ -131,8 +168,16 @@ Der Stack nutzt das **fertige GHCR-Image** — auf dem Server wird nichts gebaut
    - **Build method:** 🗂️ *Repository*
    - **Repository URL:** `https://github.com/jbkunama1/trt.Schulmanager.git`
    - **Compose path:** `docker-compose.yml`
-   - *(Optional unter Advanced → Environment variables: `APP_PASSWORD=dein-geheimes-passwort`)*
-3. **Deploy the stack** 🚀
+3. **Umgebungsvariablen** (unter *Advanced → Environment variables*):
+
+| ENV | Pflicht | Bedeutung |
+|---|---|---|
+| `APP_PASSWORD` | ✅ | Login-Passwort der Web-App (**ändern!** Standard: `lehrer2026`) |
+| `TELEGRAM_BOT_TOKEN` | optional | Token von @BotFather — leer = Telegram aus |
+| `TELEGRAM_CHAT_ID` | optional | Deine Chat-ID (erhältst du per `/start` vom Bot) — schränkt den Bot auf dich ein |
+| `REMINDER_TIME` | optional | Tägliche Klassenbuch-Erinnerung Mo–Fr, z. B. `17:30` — leer = aus |
+
+4. **Deploy the stack** 🚀
 
 > 🔄 Jeder Push auf `main` baut automatisch ein neues `latest`-Image via GitHub Actions — in Portainer dann einfach *Stacks → trt-schulmanager → Pull and redeploy*.
 
@@ -148,7 +193,10 @@ services:
     volumes:
       - schulmanager-data:/data
     environment:
-      - APP_PASSWORD=lehrer2026   # ⚠️ anpassen!
+      - APP_PASSWORD=lehrer2026        # ⚠️ anpassen!
+      - TELEGRAM_BOT_TOKEN=            # 🤖 leer = Telegram aus
+      - TELEGRAM_CHAT_ID=
+      - REMINDER_TIME=17:30           # ⏰ leer = Erinnerung aus
     restart: unless-stopped
 ```
 
@@ -162,6 +210,9 @@ docker run -d --name trt-schulmanager \
   -p 8086:8080 \
   -v trt-schulmanager-data:/data \
   -e APP_PASSWORD="dein-passwort" \
+  -e TELEGRAM_BOT_TOKEN="123:ABC" \
+  -e TELEGRAM_CHAT_ID="123456" \
+  -e REMINDER_TIME="17:30" \
   --restart unless-stopped \
   ghcr.io/jbkunama1/trt.schulmanager:latest
 
@@ -195,6 +246,7 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 
 - 🔑 Login serverseitig geprüft, Passwort über Umgebungsvariable `APP_PASSWORD` (nie im Frontend-Code)
 - 🎫 Session-Token nur im RAM des Containers — Container-Restart meldet alle Sitzungen ab
+- 🤖 Telegram-Bot antwortet nur deiner Chat-ID (`TELEGRAM_CHAT_ID`), nur ausgehende Verbindungen
 - 🚫 Kein Account-System, kein Tracking, keine Cloud — Daten bleiben auf deinem Server
 - 👤 Schülerdaten (Name, Foto, Besonderheiten!): **Pseudonymisierung** (Initialen, Listenplätze) empfohlen — die Lehrkraft bleibt datenschutzrechtlich verantwortlich
 - 🛡️ Für Zugriff aus dem Internet: Reverse-Proxy mit Auth (z. B. Cloudflare Access, nginx Basic Auth) davor schalten
@@ -217,6 +269,7 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 
 - [ ] 📝 Bewertungsbogen-Modul (Hospitationsbögen aus `trt.Klassenbuch/bewertungsbogen`)
 - [ ] ✅ Anwesenheitserfassung direkt im Klassenbuch
+- [ ] 🤖 Weitere Telegram-Commands (z. B. /kw für Wochenübersicht, Noten-Statistik)
 - [ ] 📱 PWA (Service Worker) für echte Offline-Nutzung
 - [ ] 🇩🇪 Bundesland-Notenschlüssel (BW, Bayern, NRW) als Vorlagen
 - [ ] 👤 Schüler-Notenansicht (schriftlich/mündlich-Listen aus trt.Schuelermanager)
@@ -226,8 +279,8 @@ Hinter bestehendem nginx/Cloudflare-Reverse-Proxy als zusätzlicher Upstream ein
 
 ## 🧪 Tech Stack
 
-- 🧱 **Frontend:** HTML5, CSS3 (Custom Properties für 11 Themes), Vanilla JavaScript (ES6) — keine Build-Pipeline, keine externen Abhängigkeiten
-- ⚙️ **Backend:** Python 3.12, FastAPI, uvicorn
+- 🧱 **Frontend:** HTML5, CSS3 (Custom Properties für 11 Themes, Mobile-First-Media-Queries), Vanilla JavaScript (ES6) — keine Build-Pipeline, keine externen Abhängigkeiten
+- ⚙️ **Backend:** Python 3.12, FastAPI, uvicorn; Telegram-Bot in reiner Standardbibliothek (urllib + threading)
 - 💾 **Datenbank:** SQLite (Standardbibliothek, WAL-Modus)
 - 🐳 **Deployment:** GHCR-Image via GitHub Actions (Buildx + metadata-action + Trivy-Scan), Portainer-Stack oder docker run, Healthcheck
 - 📄 **Demo:** GitHub Pages via GitHub Actions
