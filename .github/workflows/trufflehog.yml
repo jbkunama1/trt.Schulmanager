@@ -1,0 +1,14 @@
+name: TruffleHog
+on: [push, pull_request]
+jobs:
+  trufflehog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: TruffleHog OSS
+        uses: trufflesecurity/trufflehog@main
+        with:
+          base: ""
+          head: HEAD
+          extra_args: --debug --only-verified
