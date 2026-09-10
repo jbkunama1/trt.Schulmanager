@@ -1,13 +1,7 @@
 """trt.Schulmanager (LehrerWerk) — FastAPI-Backend mit SQLite, Login, Telegram und Ablage.
 
-- Kompletter App-State als JSON-Dokument in SQLite (Tabelle `state`, einzelne Zeile)
-- Login mit Passwort aus ENV (APP_PASSWORD), Session-Token im RAM
-- Schueler-Zugaenge: 6-stelliger Code -> eigenes Ablage-Verzeichnis pro Schueler
-  * Einzel-Anlage (Name + Klasse) ODER Massen-Anlage (Klassenliste, ein Name pro Zeile)
-  * Bereits vorhandene Schueler werden erkannt und uebersprungen
-- Telegram-Integration (reine Standardbibliothek, NUR Admin via TELEGRAM_CHAT_ID)
-- Ablage / Upload: Gaeste, Schueler (eigener Ordner), Lehrer (rekursiv)
-- Statisches Frontend aus /static, WAL-Modus, ein Worker pro Container
+v2.5: Zugang-Erstellung direkt aus der App-Klassenliste (Web + Telegram /zugang),
+      Codes per Telegram abrufbar (/codes), Schueler-Zugaenge mit Massen-Anlage.
 """
 import json
 import os
@@ -29,17 +23,17 @@ DB_PATH = os.environ.get("DB_PATH", "/data/lehrerwerk.db")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "lehrer2026")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-REMINDER_TIME = os.environ.get("REMINDER_TIME", "").strip()  # z. B. "17:30", leer = aus
+REMINDER_TIME = os.environ.get("REMINDER_TIME", "").strip()
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", "/data/uploads")
-UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()  # leer = Gast-Upload ohne Code
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (Telegram liefert max. 20 MB)
-MAX_BULK_STUDENTS = 60  # pro Massen-Anlage
+UPLOAD_CODE = os.environ.get("UPLOAD_CODE", "").strip()
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_BULK_STUDENTS = 60
 
 DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
-app = FastAPI(title="trt.Schulmanager API", version="2.4.0")
+app = FastAPI(title="trt.Schulmanager API", version="2.5.0")
 TOKENS: Set[str] = set()
-STUDENT_TOKENS: Dict[str, str] = {}  # token -> 6-stelliger Code
+STUDENT_TOKENS: Dict[str, str] = {}
 
 
 @contextmanager
@@ -224,7 +218,6 @@ async def upload_file(request: Request, filename: str = "", code: str = ""):
 
 @app.get("/api/files", dependencies=[Depends(require_auth)])
 def list_files():
-    """Rekursive Liste fuer den Lehrer — inkl. aller Schuelerordner."""
     base = Path(UPLOAD_DIR)
     files = []
     if base.exists():
@@ -265,7 +258,6 @@ def delete_file(rel_path: str):
 
 
 def create_access(conn, name: str, klasse: str) -> dict:
-    """Legt einen Zugang an (falls es ihn nicht schon gibt) und gibt das Ergebnis zurueck."""
     folder = student_dir(klasse, name)
     exists = conn.execute(
         "SELECT code FROM student_access WHERE folder = ?", (str(folder),)
@@ -290,6 +282,16 @@ def create_access(conn, name: str, klasse: str) -> dict:
     }
 
 
+def find_app_class(state: dict, klasse: str):
+    """Findet eine Klasse aus dem App-State (Name, case-insensitive, Slug-tolerant)."""
+    slug = folder_slug(klasse)
+    for c in state.get("classes") or []:
+        name = c.get("name") or ""
+        if folder_slug(name) == slug or klasse.strip().lower() in name.lower():
+            return c
+    return None
+
+
 @app.post("/api/students", dependencies=[Depends(require_auth)])
 def create_student_access(payload: dict = Body(...)):
     name = (payload.get("name") or "").strip()
@@ -303,21 +305,32 @@ def create_student_access(payload: dict = Body(...)):
 
 @app.post("/api/students/bulk", dependencies=[Depends(require_auth)])
 def create_student_access_bulk(payload: dict = Body(...)):
-    """Massen-Anlage: Klassenliste (ein Name pro Zeile, auch Semikolon/Komma getrennt)."""
+    """Massen-Anlage: Namen als Liste (Zeilen/Komma/Semikolon) — ODER from_class=True:
+    dann werden alle Schueler der Klasse direkt aus dem App-State uebernommen."""
     klasse = (payload.get("klasse") or "").strip()
-    names_raw = payload.get("names") or ""
     if not klasse:
         raise HTTPException(status_code=400, detail="Klasse erforderlich")
-    names = [
-        n.strip()
-        for n in names_raw.replace(";", "\n").replace(",", "\n").split("\n")
-        if n.strip()
-    ]
-    # Duplikate innerhalb der Liste entfernen
+    if payload.get("from_class"):
+        state = get_state_raw()
+        if not state:
+            raise HTTPException(status_code=400, detail="Noch keine App-Daten vorhanden")
+        c = find_app_class(state, klasse)
+        if not c:
+            raise HTTPException(status_code=404, detail=f"Klasse „{klasse}“ nicht gefunden")
+        names = [st.get("name", "").strip() for st in c.get("students") or []]
+        names = [n for n in names if n]
+        klasse = c.get("name", klasse)
+    else:
+        names_raw = payload.get("names") or ""
+        names = [
+            n.strip()
+            for n in names_raw.replace(";", "\n").replace(",", "\n").split("\n")
+            if n.strip()
+        ]
     seen = set()
     names = [n for n in names if not (n in seen or seen.add(n))]
     if not names:
-        raise HTTPException(status_code=400, detail="Keine Namen gefunden")
+        raise HTTPException(status_code=400, detail="Keine Schüler gefunden")
     if len(names) > MAX_BULK_STUDENTS:
         raise HTTPException(
             status_code=400, detail=f"Max. {MAX_BULK_STUDENTS} Schüler pro Aufruf"
@@ -444,7 +457,7 @@ main{max-width:820px;margin:0 auto;padding:20px 16px 60px}
 h2{margin:0 0 4px;font-size:20px}
 p{color:var(--mut);font-size:14px}
 label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px;font-weight:600}
-input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit}
+input,textarea,select{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
 textarea{resize:vertical;min-height:110px}
 .btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;margin-top:10px}
 .btn.ghost{background:var(--card);color:var(--acc);border:1px solid var(--acc)}
@@ -488,7 +501,7 @@ code{background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:6px;font-wei
 
 <div class="card">
 <h2>🔐 Lehrer-Bereich</h2>
-<p>Mit dem App-Passwort einloggen: alle Dateien (inkl. Schülerordner) sehen, herunterladen, löschen — plus Schüler-Zugänge verwalten.</p>
+<p>Mit dem App-Passwort einloggen: alle Dateien sehen, Schüler-Zugänge verwalten (auch aus deiner Klassenliste).</p>
 <label>Passwort</label><input type="password" id="pw" placeholder="App-Passwort">
 <button class="btn ghost" onclick="doLogin()">Anmelden</button>
 <div id="lmsg" class="msg"></div>
@@ -500,7 +513,14 @@ code{background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:6px;font-wei
 <button class="btn ghost" style="margin:0;padding:6px 12px;font-size:13px" onclick="exportCsv()">📥 Codes als CSV</button>
 </div>
 
+<label style="margin-top:8px">⚡ Aus App-Klassenliste: Klasse wählen → für alle Schüler Zugänge anlegen</label>
 <div style="display:flex;gap:8px;flex-wrap:wrap">
+<select id="appClass" style="flex:1;min-width:180px;margin:0"><option value="">– Klasse wählen –</option></select>
+<button class="btn" style="margin:0" onclick="fromAppClass()">Zugänge anlegen</button>
+</div>
+<div id="appmsg" class="msg"></div>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
 <div style="flex:1;min-width:140px"><label>Name</label><input type="text" id="stName" placeholder="z. B. Max Mustermann"></div>
 <div style="width:110px"><label>Klasse</label><input type="text" id="stKlasse" placeholder="z. B. 9b"></div>
 </div>
@@ -594,8 +614,39 @@ async function doLogin(){
     var r = await fetch("/api/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({password: document.getElementById("pw").value})});
     if(!r.ok){msg("lmsg", "❌ Falsches Passwort", "show-err"); return;}
     var j = await r.json(); TOKEN = j.token; sessionStorage.setItem("lw_token", TOKEN);
-    loadFiles(); loadStudents();
+    loadFiles(); loadStudents(); loadAppClasses();
   }catch(e){msg("lmsg", "❌ Server nicht erreichbar", "show-err");}
+}
+async function loadAppClasses(){
+  try{
+    var r = await fetch("/api/state", {headers: {Authorization: "Bearer " + TOKEN}});
+    if(!r.ok) return;
+    var j = await r.json();
+    var st = j.state || {};
+    var sel = document.getElementById("appClass");
+    sel.innerHTML = '<option value="">– Klasse wählen –</option>';
+    (st.classes || []).forEach(function(c){
+      var o = document.createElement("option");
+      o.value = c.name;
+      o.textContent = c.name + (c.subject ? " · " + c.subject : "") + " (" + (c.students || []).length + " SuS)";
+      sel.appendChild(o);
+    });
+  }catch(e){}
+}
+async function fromAppClass(){
+  var klasse = document.getElementById("appClass").value;
+  if(!klasse){msg("appmsg", "Bitte zuerst eine Klasse wählen.", "show-err"); return;}
+  msg("appmsg", "Erstelle Zugänge …", "show-ok");
+  try{
+    var r = await fetch("/api/students/bulk", {method: "POST", headers: {Authorization: "Bearer " + TOKEN, "Content-Type": "application/json"}, body: JSON.stringify({klasse: klasse, from_class: true})});
+    var j = await r.json().catch(function(){return {};});
+    if(r.ok){
+      var skippedTxt = j.skipped ? ", " + j.skipped + " bereits vorhanden" : "";
+      msg("appmsg", "✅ " + j.new + " Zugänge für " + j.klasse + " erstellt" + skippedTxt + " — Codes stehen in der Tabelle / als CSV.", "show-ok");
+      loadStudents();
+    }
+    else msg("appmsg", "❌ " + (j.detail || "Fehler"), "show-err");
+  }catch(e){msg("appmsg", "❌ " + e.message, "show-err");}
 }
 function renderTable(sel, files, mode){
   var tb = document.querySelector(sel); tb.innerHTML = "";
@@ -696,7 +747,7 @@ async function del(name){
   await fetch("/api/files/" + enc(name), {method: "DELETE", headers: {Authorization: "Bearer " + TOKEN}});
   loadFiles();
 }
-if(TOKEN){loadFiles(); loadStudents();}
+if(TOKEN){loadFiles(); loadStudents(); loadAppClasses();}
 if(STOKEN) loadMyFiles();
 </script>
 </body>
@@ -780,6 +831,9 @@ HELP_TEXT = (
     "/status — Dashboard-Kennzahlen\n"
     "/heute — heutige Klassenbuchstunden\n"
     "/noten <Klasse> — Zeugnisnoten (z. B. /noten 9b)\n"
+    "/zugang <Klasse> — Zugänge für alle Schüler der Klasse anlegen\n"
+    "/zugang <Klasse> <Name> — einzelnen Zugang anlegen\n"
+    "/codes <Klasse> — alle Codes der Klasse anzeigen\n"
     "/files — neueste Dateien in der Ablage\n"
     "/help — diese Übersicht\n\n"
     "📎 Dateien und Fotos einfach hier in den Chat schicken — "
@@ -918,6 +972,69 @@ def cmd_noten(name: str) -> str:
     return "\n".join(lines)
 
 
+def cmd_zugang(arg: str) -> str:
+    parts = arg.split()
+    if not parts:
+        return "Verwendung: /zugang <Klasse> — oder /zugang <Klasse> <Name>"
+    klasse = parts[0]
+    name = " ".join(parts[1:]).strip() or None
+    s = get_state_raw()
+    if not s:
+        return "Noch keine App-Daten vorhanden."
+    if name:
+        with db() as conn:
+            res = create_access(conn, name, klasse)
+        if res["skip"]:
+            return f"👤 {name}: Zugang existiert bereits — Code <code>{res['code']}</code>"
+        return (
+            f"👤 <b>Zugang erstellt</b>\n\n"
+            f"👤 {res['name']} ({res['klasse']})\n"
+            f"🔑 Code: <code>{res['code']}</code>\n"
+            f"📁 Ordner: {res['folder']}"
+        )
+    c = find_app_class(s, klasse)
+    if not c:
+        return f"Klasse „{klasse}“ nicht in der App gefunden."
+    klasse_name = c.get("name", klasse)
+    names = [st.get("name", "").strip() for st in c.get("students") or []]
+    names = [n for n in names if n]
+    if not names:
+        return f"Klasse {klasse_name} hat keine Schüler in der App."
+    lines = [f"👥 <b>Zugänge für {klasse_name} ({len(names)} Schüler)</b>", ""]
+    skipped = 0
+    with db() as conn:
+        for n in names:
+            r = create_access(conn, n, klasse_name)
+            if r["skip"]:
+                skipped += 1
+            lines.append(f"• {n}: <code>{r['code']}</code>")
+    if skipped:
+        lines.append("")
+        lines.append(f"({skipped} bereits vorhanden — alter Code behalten)")
+    return "\n".join(lines)
+
+
+def cmd_codes(klasse: str) -> str:
+    if not klasse:
+        return "Verwendung: /codes <Klasse>"
+    slug = folder_slug(klasse)
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT name, code, folder FROM student_access ORDER BY name"
+        ).fetchall()
+    hits = []
+    for name, code, folder in rows:
+        parent = Path(folder).parent.name
+        if folder_slug(parent) == slug or slug in folder_slug(name):
+            hits.append((name, code))
+    if not hits:
+        return f"Keine Zugänge für „{klasse}“ gefunden."
+    lines = [f"🔑 <b>Codes für {klasse}</b> ({len(hits)})", ""]
+    for name, code in hits:
+        lines.append(f"• {name}: <code>{code}</code>")
+    return "\n".join(lines)
+
+
 def cmd_files() -> str:
     d = Path(UPLOAD_DIR)
     if not d.exists() or not any(d.iterdir()):
@@ -969,6 +1086,10 @@ def handle_update(upd: dict):
         tg_send(cmd_status(), chat_id)
     elif cmd == "/heute":
         tg_send(cmd_heute(), chat_id)
+    elif cmd == "/codes":
+        tg_send(cmd_codes(text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""), chat_id)
+    elif cmd == "/zugang":
+        tg_send(cmd_zugang(text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ""), chat_id)
     elif cmd == "/files":
         tg_send(cmd_files(), chat_id)
     elif cmd == "/noten":
