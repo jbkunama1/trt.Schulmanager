@@ -343,6 +343,11 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     <div id="doc-list"></div>
   </div>
   <div class="card">
+    <h3>ICS Kalender-Import</h3>
+    <p class="mut">Importiere Stundenpläne aus einer .ics-Datei.</p>
+    <label class="btn ghost">Datei auswählen<input id="ics-import" type="file" accept=".ics" hidden></label>
+  </div>
+  <div class="card">
     <h3>Notizen</h3>
     <div class="row" style="margin-bottom:10px">
       <input id="note-text" placeholder="Notiz eingeben..." style="flex:1">
@@ -1190,6 +1195,31 @@ function delNote(id){
   state.notes=state.notes.filter(n=>n.id!==id);
   save();renderNotes();
 }
+$("#ics-import").addEventListener("change",async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const text=await f.text();
+  const lines=text.split(/\r?\n/);
+  let dtstart=null,summary="",description="";
+  for(const line of lines){
+    if(line.startsWith("DTSTART:"))dtstart=line.slice(8);
+    else if(line.startsWith("SUMMARY:"))summary=line.slice(8);
+    else if(line.startsWith("DESCRIPTION:"))description=line.slice(12);
+    else if(line.startsWith("END:VEVENT")&&dtstart){
+      const d=new Date(dtstart.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/,"$1-$2-$3T$4:$5:$6"));
+      if(!isNaN(d)){
+        const wk=weekKey({week:Math.ceil(d.getDate()/7),year:d.getFullYear()});
+        if(!state.lessons[wk])state.lessons[wk]={};
+        const day=d.getDay()-1;if(day>=0&&day<5){
+          const h=Object.keys(state.lessons[wk]).filter(k=>k.startsWith(day+"-")).length+1;
+          state.lessons[wk][day+"-"+h]={subject:summary,topic:description,teacher:"",homework:"",notes:""};
+        }
+      }
+      dtstart=null;summary="";description="";
+    }
+  }
+  save();renderKlassenbuch();toast("ICS importiert");
+  e.target.value="";
+});
 function renderAll(){
   applyTheme();
   fillScaleSelect($("#rc-scale"));
