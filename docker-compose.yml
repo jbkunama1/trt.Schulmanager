@@ -9,7 +9,7 @@ services:
     volumes:
       - schulmanager-data:/data
     environment:
-      - APP_PASSWORD=lehrer2026
+      - APP_PASSWORD
       - TELEGRAM_BOT_TOKEN
       - TELEGRAM_CHAT_ID
       - REMINDER_TIME=17:30
