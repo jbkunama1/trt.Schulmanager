@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>trt.LehrerWerk — Klassenbuch, Schüler & Noten in einer App</title>
+<title>RealTeacher SchulManager — Klassenbuch, Schüler & Noten in einer App</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/><text x='50' y='72' font-size='52' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>LW</text></svg>">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--ink:#16233a;--mut:#64748b;--acc:#2563eb;--acc2:#1e40af;--line:#e2e8f0;--red:#dc2626;--head:#101a2e;--thead:#f1f5f9;--inputbg:#fff;--accSoft:rgba(37,99,235,.08);--accBorder:rgba(37,99,235,.35)}
@@ -188,7 +188,7 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
 <body>
 <div id="loginScreen" class="login-screen hidden">
   <div class="login-box">
-    <h2>📚 LehrerWerk</h2>
+    <h2>📚 RealTeacher SchulManager</h2>
     <p class="mut" style="text-align:center">Klassenbuch · Schüler · Noten</p>
     <div class="form-group"><label>Passwort</label><input type="password" id="pwInput" placeholder="Passwort eingeben" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <p id="loginErr" class="mut hidden" style="color:var(--red)"></p>
@@ -199,7 +199,8 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
 <div id="appWrap" class="hidden">
 <header>
   <div class="brand">
-    <span class="logo">LW</span> trt.LehrerWerk
+    <img src="logo_i.png" alt="Logo" style="height:32px;margin-right:8px;vertical-align:middle">
+    <span class="logo">RSM</span> RealTeacher SchulManager
     <span class="sub">Klassenbuch · Schüler · Noten · Planung</span>
     <span id="sync-ind" class="sync saving">○ verbinde…</span>
     <select id="themeSel" class="themesel" title="Theme schnell wechseln"></select>
@@ -212,21 +213,23 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     <button data-tab="noten">Noten</button>
     <button data-tab="rechner">Rechner</button>
     <button data-tab="planung">Planung</button>
+    <button data-tab="export">Export</button>
     <button data-tab="backup">Backup</button>
     <button data-tab="admin">Admin</button>
   </nav>
 </header>
 <main>
-<section id="tab-dashboard" class="tab active">
+<section id="tab-export" class="tab">
   <div class="card">
-    <h2>Dashboard</h2>
-    <p class="mut">Dein Unterrichts-Cockpit — alles auf einen Blick. Aktuell: <b id="dash-week">–</b></p>
-    <div class="statgrid" id="dash-stats"></div>
-  </div>
-  <div class="card">
-    <h3>Schnellzugriff</h3>
+    <h2>Export</h2>
+    <p class="mut">Hier kannst du deine Daten in verschiedenen Formaten exportieren.</p>
     <div class="row">
-      <button class="btn sm" onclick="go('klassenbuch')">📖 Klassenbuch öffnen</button>
+      <a href="/export/pdf" class="btn">PDF Export</a>
+      <a href="/export/docx" class="btn">DOCX Export</a>
+      <a href="/export/xlsx" class="btn">XLSX Export</a>
+    </div>
+  </div>
+</section>
       <button class="btn sm ghost" onclick="go('noten')">📊 Noten eintragen</button>
       <button class="btn sm ghost" onclick="go('rechner')">🧮 Noten rechnen</button>
       <button class="btn sm ghost" onclick="go('planung')">🗂️ Planung</button>
@@ -304,6 +307,15 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     </div>
     <button class="btn" id="gen-save">Schlüssel speichern</button>
   </div>
+  <div class="card">
+    <h3>Schlüssel-Zuordnung</h3>
+    <p class="mut">Wähle einen Schlüssel für eine Klasse oder ein Fach.</p>
+    <div class="grid g2">
+      <div><label>Klasse</label><select id="bind-class"></select></div>
+      <div><label>Schlüssel</label><select id="bind-scale"></select></div>
+    </div>
+    <button class="btn" id="bind-save">Zuordnung speichern</button>
+  </div>
   <div class="card"><h3>Vorschau (Punkte → Note)</h3><div id="gen-table" class="scroll-x"></div><div id="gen-list" style="margin-top:12px"></div></div>
   <div class="card">
     <h3>Notendurchschnitt-Rechner</h3>
@@ -322,6 +334,14 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     <div id="pl-units"></div>
   </div>
   <div class="card">
+    <h3>Stoffverteilungsplan (BP 2016)</h3>
+    <p class="mut">Importiere Bildungspläne oder erstelle sie manuell.</p>
+    <div class="row">
+      <button class="btn sm ghost" onclick="importBP('Sport')">Sport BP 2016</button>
+      <button class="btn sm ghost" onclick="importBP('Technik')">Technik BP 2016</button>
+    </div>
+  </div>
+  <div class="card">
     <h3>Dokumentation</h3>
     <div class="tabbar" id="docTabs">
       <button data-doc="uvp" class="active">UVP</button>
@@ -329,6 +349,20 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
       <button data-doc="reflexion">Reflexionen</button>
     </div>
     <div id="doc-list"></div>
+  </div>
+  <div class="card">
+    <h3>ICS Kalender-Import</h3>
+    <p class="mut">Importiere Stundenpläne aus einer .ics-Datei.</p>
+    <label class="btn ghost">Datei auswählen<input id="ics-import" type="file" accept=".ics" hidden></label>
+  </div>
+  <div class="card">
+    <h3>Notizen</h3>
+    <div class="row" style="margin-bottom:10px">
+      <input id="note-text" placeholder="Notiz eingeben..." style="flex:1">
+      <input id="note-tag" placeholder="Tag (z. B. Klasse, Schüler)" style="width:120px">
+      <button class="btn sm" id="note-add">+</button>
+    </div>
+    <div id="note-list"></div>
   </div>
 </section>
 <section id="tab-backup" class="tab">
@@ -629,15 +663,18 @@ function genPreview(){
   $("#gen-table").innerHTML=`<table><thead><tr><th>Notenpunkte</th><th>Note</th><th>ab Prozent</th><th>ab Punkte (max ${max||"–"}${sockel?", Sockel "+sockel:""})</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 ["gen-pass","gen-max","gen-sockel"].forEach(id=>$("#"+id).addEventListener("input",genPreview));
-$("#gen-save").addEventListener("click",()=>{
-  const name=$("#gen-name").value.trim();
-  if(!name){toast("Bitte einen Namen für den Schlüssel eingeben");return}
-  state.customScales.push({id:"c"+uid(),name,type:"linear",pass:+$("#gen-pass").value,sockel:parseFloat($("#gen-sockel").value)||0});
-  save();$("#gen-name").value="";
-  renderGenList();fillScaleSelect($("#rc-scale"));
-  const ex=$("#ex-scale");if(ex)fillScaleSelect(ex);
-  rcCalc();toast("Schlüssel „"+name+"“ gespeichert");
+$("#bind-save").addEventListener("click",()=>{
+  const cid=$("#bind-class").value;
+  const sid=$("#bind-scale").value;
+  if(!cid||!sid){toast("Bitte Klasse und Schlüssel wählen");return}
+  state.classScales[cid]=sid;
+  save();toast("Schlüssel zugeordnet");
 });
+function fillBindSelects(){
+  const c=$("#bind-class"),s=$("#bind-scale");
+  c.innerHTML=state.classes.map(cl=>`<option value="${cl.id}">${esc(cl.name)}</option>`).join("");
+  s.innerHTML=Object.entries(allScales()).map(([id,sc])=>`<option value="${id}">${esc(sc.name)}</option>`).join("");
+}
 function renderGenList(){
   const el=$("#gen-list");
   if(!state.customScales.length){el.innerHTML=`<div class="empty">Noch keine eigenen Schlüssel.</div>`;return}
@@ -874,7 +911,9 @@ function examGrade(ex,sid){
   const r=ex.results[sid];if(!r)return null;
   if(r.note!=null)return{grade:r.note,override:true};
   if(r.points==null||r.points==="")return null;
-  const sc=getScale(ex.scale);
+  const cid=state.ui.currentClass;
+  const scaleId=state.classScales[cid]||ex.scale;
+  const sc=getScale(scaleId);
   const res=gradeFromPct(pctOf(+r.points,ex.max,sc.sockel||0),sc);
   res.override=false;return res;
 }
@@ -1039,6 +1078,23 @@ function renderPlanung(){
     </div>`).join(""):`<div class="empty">Noch keine Einheiten — „+ Einheit“ für die Stoffverteilung.</div>`;
   renderDocs();
 }
+function importBP(fach){
+  const bp={
+    Sport: [
+      {title:"Bewegung und Sport",description:"Grundlagen der Bewegung",goals:"Motorische Fähigkeiten"},
+      {title:"Sportspiele",description:"Mannschaftsspiele",goals:"Teamfähigkeit"}
+    ],
+    Technik: [
+      {title:"Werkstoffe",description:"Holz, Metall, Kunststoff",goals:"Materialkunde"},
+      {title:"Fertigungsverfahren",description:"Sägen, Bohren, Feilen",goals:"Handwerkliche Fertigkeiten"}
+    ]
+  };
+  const units=bp[fach]||[];
+  units.forEach(u=>{
+    state.units.push({id:Date.now()+Math.random(),...u,subject:fach,klasse:"",plannedWeeks:4,status:"Geplant"});
+  });
+  save();renderPlanung();toast(fach+" BP 2016 importiert");
+}
 function editUnit(id){
   const un=id?state.units.find(x=>x.id===id):{title:"",subject:"",klasse:"",plannedWeeks:4,status:"Geplant",description:"",goals:""};
   openModal(`<h3>${id?"Einheit bearbeiten":"Neue Unterrichtseinheit"}</h3>
@@ -1085,12 +1141,22 @@ function editDoc(id){
   openModal(`<h3>${id?"Dokument bearbeiten":DOC_TITLES[curDocTab]}</h3>
     <label>Titel *</label><input id="m-dtitle" value="${esc(d.title)}">
     <label>Inhalt</label><textarea id="m-dcontent" rows="10">${esc(d.content)}</textarea>
+    <label>Datei hochladen (PDF/MD)</label><input type="file" id="m-dfile" accept=".pdf,.md">
     <div class="row"><button class="btn" onclick="saveDoc(${id||"null"})">Speichern</button><button class="btn ghost" onclick="closeModal()">Abbrechen</button></div>`);
 }
-function saveDoc(id){
+async function saveDoc(id){
   const title=$("#m-dtitle").value.trim();
+  const fileInput=$("#m-dfile");
   if(!title){toast("Titel eingeben");return}
-  const data={title,content:$("#m-dcontent").value,date:new Date().toLocaleDateString("de-DE")};
+  let filename=null;
+  if(fileInput.files.length>0){
+    const formData=new FormData();
+    formData.append("file",fileInput.files[0]);
+    const res=await fetch("/api/upload",{method:"POST",body:formData});
+    if(res.ok){const j=await res.json();filename=j.filename}
+    else{toast("Upload fehlgeschlagen");return}
+  }
+  const data={title,content:$("#m-dcontent").value,date:new Date().toLocaleDateString("de-DE"),file:filename};
   if(!state.documents[curDocTab])state.documents[curDocTab]=[];
   if(id){Object.assign(state.documents[curDocTab].find(x=>x.id===id),data)}
   else state.documents[curDocTab].push({id:Date.now(),...data});
@@ -1147,6 +1213,48 @@ function renderBackupInfo(){
   $("#bk-last").textContent=state.lastBackup?new Date(state.lastBackup).toLocaleString("de-DE"):"–";
   $("#bk-server").textContent=serverUpdatedAt?new Date(serverUpdatedAt).toLocaleString("de-DE"):"–";
 }
+function renderNotes(){
+  const el=$("#note-list");
+  if(!state.notes||!state.notes.length){el.innerHTML=`<div class="empty">Noch keine Notizen.</div>`;return}
+  el.innerHTML=state.notes.map(n=>`<div class="list-item"><div><b>${esc(n.text)}</b><br><span class="mut">${esc(n.tag||"")} · ${new Date(n.date).toLocaleString("de-DE")}</span></div><button class="del" onclick="delNote('${n.id}')">✕</button></div>`).join("");
+}
+$("#note-add").addEventListener("click",()=>{
+  const text=$("#note-text").value.trim();
+  const tag=$("#note-tag").value.trim();
+  if(!text){toast("Notiz eingeben");return}
+  state.notes=state.notes||[];
+  state.notes.push({id:uid(),text,tag,date:new Date().toISOString()});
+  save();$("#note-text").value="";$("#note-tag").value="";renderNotes();
+});
+function delNote(id){
+  state.notes=state.notes.filter(n=>n.id!==id);
+  save();renderNotes();
+}
+$("#ics-import").addEventListener("change",async e=>{
+  const f=e.target.files[0];if(!f)return;
+  const text=await f.text();
+  const lines=text.split(/\r?\n/);
+  let dtstart=null,summary="",description="";
+  for(const line of lines){
+    if(line.startsWith("DTSTART:"))dtstart=line.slice(8);
+    else if(line.startsWith("SUMMARY:"))summary=line.slice(8);
+    else if(line.startsWith("DESCRIPTION:"))description=line.slice(12);
+    else if(line.startsWith("END:VEVENT")&&dtstart){
+      const d=new Date(dtstart.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/,"$1-$2-$3T$4:$5:$6"));
+      if(!isNaN(d)){
+        const wk=weekKey({week:Math.ceil(d.getDate()/7),year:d.getFullYear()});
+        if(!state.lessons[wk])state.lessons[wk]={};
+        const day=d.getDay()-1;if(day>=0&&day<5){
+          const h=Object.keys(state.lessons[wk]).filter(k=>k.startsWith(day+"-")).length+1;
+          state.lessons[wk][day+"-"+h]={subject:summary,topic:description,teacher:"",homework:"",notes:""};
+        }
+      }
+      dtstart=null;summary="";description="";
+    }
+  }
+  save();renderKlassenbuch();toast("ICS importiert");
+  e.target.value="";
+});
 function renderAll(){
   applyTheme();
   fillScaleSelect($("#rc-scale"));
@@ -1155,7 +1263,7 @@ function renderAll(){
   $("#adm-hours").value=state.settings.hours||8;
   rcCalc();genPreview();renderGenList();
   const tb=$("#av-table tbody");tb.innerHTML="";avAddRow();avAddRow();
-  renderClasses();renderNoten();renderKlassenbuch();renderPlanung();renderDocs();
+  renderClasses();renderNoten();renderKlassenbuch();renderPlanung();renderDocs();renderNotes();
   updateDashboard();renderBackupInfo();
 }
 (async function(){

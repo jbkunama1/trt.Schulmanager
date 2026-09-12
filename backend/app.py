@@ -16,8 +16,12 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, Set
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
+import io
+import pandas as pd
+from docx import Document
+from reportlab.pdfgen import canvas
 from fastapi.staticfiles import StaticFiles
 
 DB_PATH = os.environ.get("DB_PATH", "/data/lehrerwerk.db")
@@ -1156,5 +1160,29 @@ def start_background_threads():
             tg_send("✅ trt.Schulmanager-Bot ist verbunden. Hallo, ich bin da!\n\n" + HELP_TEXT)
 
 
-# Statisches Frontend — nach den API-Routen mounten
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+@app.get("/export/xlsx")
+def export_xlsx():
+    with db() as conn:
+        df = pd.read_sql_query("SELECT * FROM student_access", conn)
+    output = io.BytesIO()
+    df.to_excel(output, index=False)
+    output.seek(0)
+    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=export.xlsx"})
+
+@app.get("/export/pdf")
+def export_pdf():
+    output = io.BytesIO()
+    p = canvas.Canvas(output)
+    p.drawString(100, 750, "RealTeacher SchulManager Export")
+    p.showPage()
+    p.save()
+    output.seek(0)
+    return StreamingResponse(output, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=export.pdf"})
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    file_path = Path(UPLOAD_DIR) / file.filename
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+    return {"filename": file.filename}
