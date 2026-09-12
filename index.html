@@ -213,21 +213,23 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     <button data-tab="noten">Noten</button>
     <button data-tab="rechner">Rechner</button>
     <button data-tab="planung">Planung</button>
+    <button data-tab="export">Export</button>
     <button data-tab="backup">Backup</button>
     <button data-tab="admin">Admin</button>
   </nav>
 </header>
 <main>
-<section id="tab-dashboard" class="tab active">
+<section id="tab-export" class="tab">
   <div class="card">
-    <h2>Dashboard</h2>
-    <p class="mut">Dein Unterrichts-Cockpit — alles auf einen Blick. Aktuell: <b id="dash-week">–</b></p>
-    <div class="statgrid" id="dash-stats"></div>
-  </div>
-  <div class="card">
-    <h3>Schnellzugriff</h3>
+    <h2>Export</h2>
+    <p class="mut">Hier kannst du deine Daten in verschiedenen Formaten exportieren.</p>
     <div class="row">
-      <button class="btn sm" onclick="go('klassenbuch')">📖 Klassenbuch öffnen</button>
+      <a href="/export/pdf" class="btn">PDF Export</a>
+      <a href="/export/docx" class="btn">DOCX Export</a>
+      <a href="/export/xlsx" class="btn">XLSX Export</a>
+    </div>
+  </div>
+</section>
       <button class="btn sm ghost" onclick="go('noten')">📊 Noten eintragen</button>
       <button class="btn sm ghost" onclick="go('rechner')">🧮 Noten rechnen</button>
       <button class="btn sm ghost" onclick="go('planung')">🗂️ Planung</button>
