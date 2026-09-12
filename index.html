@@ -641,15 +641,18 @@ function genPreview(){
   $("#gen-table").innerHTML=`<table><thead><tr><th>Notenpunkte</th><th>Note</th><th>ab Prozent</th><th>ab Punkte (max ${max||"–"}${sockel?", Sockel "+sockel:""})</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 ["gen-pass","gen-max","gen-sockel"].forEach(id=>$("#"+id).addEventListener("input",genPreview));
-$("#gen-save").addEventListener("click",()=>{
-  const name=$("#gen-name").value.trim();
-  if(!name){toast("Bitte einen Namen für den Schlüssel eingeben");return}
-  state.customScales.push({id:"c"+uid(),name,type:"linear",pass:+$("#gen-pass").value,sockel:parseFloat($("#gen-sockel").value)||0});
-  save();$("#gen-name").value="";
-  renderGenList();fillScaleSelect($("#rc-scale"));
-  const ex=$("#ex-scale");if(ex)fillScaleSelect(ex);
-  rcCalc();toast("Schlüssel „"+name+"“ gespeichert");
+$("#bind-save").addEventListener("click",()=>{
+  const cid=$("#bind-class").value;
+  const sid=$("#bind-scale").value;
+  if(!cid||!sid){toast("Bitte Klasse und Schlüssel wählen");return}
+  state.classScales[cid]=sid;
+  save();toast("Schlüssel zugeordnet");
 });
+function fillBindSelects(){
+  const c=$("#bind-class"),s=$("#bind-scale");
+  c.innerHTML=state.classes.map(cl=>`<option value="${cl.id}">${esc(cl.name)}</option>`).join("");
+  s.innerHTML=Object.entries(allScales()).map(([id,sc])=>`<option value="${id}">${esc(sc.name)}</option>`).join("");
+}
 function renderGenList(){
   const el=$("#gen-list");
   if(!state.customScales.length){el.innerHTML=`<div class="empty">Noch keine eigenen Schlüssel.</div>`;return}
@@ -886,7 +889,9 @@ function examGrade(ex,sid){
   const r=ex.results[sid];if(!r)return null;
   if(r.note!=null)return{grade:r.note,override:true};
   if(r.points==null||r.points==="")return null;
-  const sc=getScale(ex.scale);
+  const cid=state.ui.currentClass;
+  const scaleId=state.classScales[cid]||ex.scale;
+  const sc=getScale(scaleId);
   const res=gradeFromPct(pctOf(+r.points,ex.max,sc.sockel||0),sc);
   res.override=false;return res;
 }
