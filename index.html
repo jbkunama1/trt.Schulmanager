@@ -342,6 +342,15 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
     </div>
     <div id="doc-list"></div>
   </div>
+  <div class="card">
+    <h3>Notizen</h3>
+    <div class="row" style="margin-bottom:10px">
+      <input id="note-text" placeholder="Notiz eingeben..." style="flex:1">
+      <input id="note-tag" placeholder="Tag (z. B. Klasse, Schüler)" style="width:120px">
+      <button class="btn sm" id="note-add">+</button>
+    </div>
+    <div id="note-list"></div>
+  </div>
 </section>
 <section id="tab-backup" class="tab">
   <div class="card">
@@ -1164,6 +1173,23 @@ function renderBackupInfo(){
   $("#bk-last").textContent=state.lastBackup?new Date(state.lastBackup).toLocaleString("de-DE"):"–";
   $("#bk-server").textContent=serverUpdatedAt?new Date(serverUpdatedAt).toLocaleString("de-DE"):"–";
 }
+function renderNotes(){
+  const el=$("#note-list");
+  if(!state.notes||!state.notes.length){el.innerHTML=`<div class="empty">Noch keine Notizen.</div>`;return}
+  el.innerHTML=state.notes.map(n=>`<div class="list-item"><div><b>${esc(n.text)}</b><br><span class="mut">${esc(n.tag||"")} · ${new Date(n.date).toLocaleString("de-DE")}</span></div><button class="del" onclick="delNote('${n.id}')">✕</button></div>`).join("");
+}
+$("#note-add").addEventListener("click",()=>{
+  const text=$("#note-text").value.trim();
+  const tag=$("#note-tag").value.trim();
+  if(!text){toast("Notiz eingeben");return}
+  state.notes=state.notes||[];
+  state.notes.push({id:uid(),text,tag,date:new Date().toISOString()});
+  save();$("#note-text").value="";$("#note-tag").value="";renderNotes();
+});
+function delNote(id){
+  state.notes=state.notes.filter(n=>n.id!==id);
+  save();renderNotes();
+}
 function renderAll(){
   applyTheme();
   fillScaleSelect($("#rc-scale"));
@@ -1172,7 +1198,7 @@ function renderAll(){
   $("#adm-hours").value=state.settings.hours||8;
   rcCalc();genPreview();renderGenList();
   const tb=$("#av-table tbody");tb.innerHTML="";avAddRow();avAddRow();
-  renderClasses();renderNoten();renderKlassenbuch();renderPlanung();renderDocs();
+  renderClasses();renderNoten();renderKlassenbuch();renderPlanung();renderDocs();renderNotes();
   updateDashboard();renderBackupInfo();
 }
 (async function(){
