@@ -9,15 +9,10 @@ services:
     volumes:
       - schulmanager-data:/data
     environment:
-      # Login-Passwort der Web-App — in Portainer anpassen!
-      - APP_PASSWORD=lehrer2026
-      # 🤖 Telegram-Bot (Token von @BotFather; leer lassen = Telegram deaktiviert)
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      # Deine Chat-ID (erhältst du per /start vom Bot; leer = Bot antwortet jedem mit dessen ID)
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
-      # ⏰ Tägliche Klassenbuch-Erinnerung Mo–Fr, z. B. 17:30 (leer = Erinnerung deaktiviert)
+      - APP_PASSWORD
+      - TELEGRAM_BOT_TOKEN
+      - TELEGRAM_CHAT_ID
       - REMINDER_TIME=17:30
-      # 📎 Zugangscode für Schüler-Uploads unter /upload (leer = Upload ohne Code möglich)
       - UPLOAD_CODE=
     networks:
       - highfishNetwork

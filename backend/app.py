@@ -1144,6 +1144,7 @@ def reminder_loop():
 
 @app.on_event("startup")
 def start_background_threads():
+    print(f"[telegram] startup: TELEGRAM_TOKEN present={bool(TELEGRAM_TOKEN)}, TELEGRAM_CHAT_ID={bool(TELEGRAM_CHAT_ID)}")
     if TELEGRAM_TOKEN:
         threading.Thread(target=bot_loop, daemon=True, name="tg-bot").start()
         if REMINDER_TIME and TELEGRAM_CHAT_ID:
