@@ -15,7 +15,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Dict, Set
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 import io
 import pandas as pd
@@ -1176,12 +1176,10 @@ def export_pdf():
     output.seek(0)
     return StreamingResponse(output, media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=export.pdf"})
 
-@app.get("/export/docx")
-def export_docx():
-    doc = Document()
-    doc.add_heading('RealTeacher SchulManager Export', 0)
-    doc.add_paragraph('Dies ist ein Export aus dem SchulManager.')
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
-    return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": "attachment; filename=export.docx"})
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    file_path = Path(UPLOAD_DIR) / file.filename
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
+    return {"filename": file.filename}
