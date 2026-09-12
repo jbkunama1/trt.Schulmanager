@@ -1116,12 +1116,22 @@ function editDoc(id){
   openModal(`<h3>${id?"Dokument bearbeiten":DOC_TITLES[curDocTab]}</h3>
     <label>Titel *</label><input id="m-dtitle" value="${esc(d.title)}">
     <label>Inhalt</label><textarea id="m-dcontent" rows="10">${esc(d.content)}</textarea>
+    <label>Datei hochladen (PDF/MD)</label><input type="file" id="m-dfile" accept=".pdf,.md">
     <div class="row"><button class="btn" onclick="saveDoc(${id||"null"})">Speichern</button><button class="btn ghost" onclick="closeModal()">Abbrechen</button></div>`);
 }
-function saveDoc(id){
+async function saveDoc(id){
   const title=$("#m-dtitle").value.trim();
+  const fileInput=$("#m-dfile");
   if(!title){toast("Titel eingeben");return}
-  const data={title,content:$("#m-dcontent").value,date:new Date().toLocaleDateString("de-DE")};
+  let filename=null;
+  if(fileInput.files.length>0){
+    const formData=new FormData();
+    formData.append("file",fileInput.files[0]);
+    const res=await fetch("/api/upload",{method:"POST",body:formData});
+    if(res.ok){const j=await res.json();filename=j.filename}
+    else{toast("Upload fehlgeschlagen");return}
+  }
+  const data={title,content:$("#m-dcontent").value,date:new Date().toLocaleDateString("de-DE"),file:filename};
   if(!state.documents[curDocTab])state.documents[curDocTab]=[];
   if(id){Object.assign(state.documents[curDocTab].find(x=>x.id===id),data)}
   else state.documents[curDocTab].push({id:Date.now(),...data});
