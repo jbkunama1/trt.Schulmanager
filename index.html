@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>trt.LehrerWerk — Klassenbuch, Schüler & Noten in einer App</title>
+<title>RealTeacher SchulManager — Klassenbuch, Schüler & Noten in einer App</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/><text x='50' y='72' font-size='52' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>LW</text></svg>">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--ink:#16233a;--mut:#64748b;--acc:#2563eb;--acc2:#1e40af;--line:#e2e8f0;--red:#dc2626;--head:#101a2e;--thead:#f1f5f9;--inputbg:#fff;--accSoft:rgba(37,99,235,.08);--accBorder:rgba(37,99,235,.35)}
@@ -188,7 +188,7 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
 <body>
 <div id="loginScreen" class="login-screen hidden">
   <div class="login-box">
-    <h2>📚 LehrerWerk</h2>
+    <h2>📚 RealTeacher SchulManager</h2>
     <p class="mut" style="text-align:center">Klassenbuch · Schüler · Noten</p>
     <div class="form-group"><label>Passwort</label><input type="password" id="pwInput" placeholder="Passwort eingeben" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <p id="loginErr" class="mut hidden" style="color:var(--red)"></p>
@@ -199,7 +199,8 @@ code{background:var(--accSoft);padding:2px 6px;border-radius:6px;font-size:13px}
 <div id="appWrap" class="hidden">
 <header>
   <div class="brand">
-    <span class="logo">LW</span> trt.LehrerWerk
+    <img src="logo_i.png" alt="Logo" style="height:32px;margin-right:8px;vertical-align:middle">
+    <span class="logo">RSM</span> RealTeacher SchulManager
     <span class="sub">Klassenbuch · Schüler · Noten · Planung</span>
     <span id="sync-ind" class="sync saving">○ verbinde…</span>
     <select id="themeSel" class="themesel" title="Theme schnell wechseln"></select>
