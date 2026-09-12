@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 import urllib.request
+import html
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -862,6 +863,8 @@ def tg_send(text: str, chat_id: str = None):
     cid = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_TOKEN or not cid:
         return
+    if "<" in text and "<b>" not in text:
+        text = html.escape(text)
     while text:
         tg_call("sendMessage", chat_id=cid, text=text[:4000], parse_mode="HTML")
         text = text[4000:]
