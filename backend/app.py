@@ -850,6 +850,8 @@ def tg_call(method: str, **params):
     if not TELEGRAM_TOKEN:
         return None
     try:
+        # Filter out None values from params
+        params = {k: v for k, v in params.items() if v is not None}
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/{method}",
             data=json.dumps(params).encode("utf-8"),
@@ -858,7 +860,13 @@ def tg_call(method: str, **params):
         with urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read().decode("utf-8"))
     except Exception as exc:
-        print("[telegram]", method, "→", exc)
+        print(f"[telegram] {method} error: {exc}")
+        if hasattr(exc, 'read'):
+            try:
+                error_body = exc.read().decode('utf-8')
+                print(f"[telegram] {method} response: {error_body}")
+            except:
+                pass
         return None
 
 
