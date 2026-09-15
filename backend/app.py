@@ -870,10 +870,15 @@ def tg_call(method: str, **params):
         return None
 
 
-def tg_send(text: str, chat_id: str = None):
+def tg_send(text: str, chat_id: str = None, reply_markup: dict = None):
     cid = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_TOKEN or not cid:
         return
+    params = {"chat_id": cid, "text": text[:4000], "parse_mode": "HTML"}
+    if reply_markup:
+        params["reply_markup"] = reply_markup
+    tg_call("sendMessage", **params)
+    text = text[4000:]
     while text:
         tg_call("sendMessage", chat_id=cid, text=text[:4000], parse_mode="HTML")
         text = text[4000:]
@@ -1063,6 +1068,24 @@ def cmd_files() -> str:
 
 
 def handle_update(upd: dict):
+    # Handle callback queries from inline keyboards
+    callback_query = upd.get("callback_query")
+    if callback_query:
+        cq_id = callback_query.get("id")
+        chat_id = str(((callback_query.get("message") or {}).get("chat") or {}).get("id") or "")
+        data = callback_query.get("data", "")
+        if chat_id and (not TELEGRAM_CHAT_ID or chat_id == TELEGRAM_CHAT_ID):
+            if data == "/status":
+                tg_send(cmd_status(), chat_id)
+            elif data == "/heute":
+                tg_send(cmd_heute(), chat_id)
+            elif data == "/files":
+                tg_send(cmd_files(), chat_id)
+            elif data == "/help":
+                tg_send(HELP_TEXT, chat_id)
+        tg_call("answerCallbackQuery", callback_query_id=cq_id)
+        return
+
     msg = upd.get("message") or {}
     chat_id = str((msg.get("chat") or {}).get("id") or "")
     if not chat_id:
@@ -1162,7 +1185,13 @@ def start_background_threads():
         if REMINDER_TIME and TELEGRAM_CHAT_ID:
             threading.Thread(target=reminder_loop, daemon=True, name="tg-reminder").start()
         if TELEGRAM_CHAT_ID:
-            tg_send("✅ trt.Schulmanager-Bot ist verbunden. Hallo, ich bin da!\n\n" + HELP_TEXT)
+            markup = {
+                "inline_keyboard": [
+                    [{"text": "📊 Status", "callback_data": "/status"}, {"text": "📖 Heute", "callback_data": "/heute"}],
+                    [{"text": "📎 Dateien", "callback_data": "/files"}, {"text": "❓ Hilfe", "callback_data": "/help"}]
+                ]
+            }
+            tg_send("✅ <b>trt.Schulmanager-Bot ist gestartet und verbunden!</b>\n\n" + HELP_TEXT, reply_markup=markup)
 
 
 @app.get("/export/xlsx")
