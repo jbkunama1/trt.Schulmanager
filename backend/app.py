@@ -865,8 +865,8 @@ def tg_call(method: str, **params):
             try:
                 error_body = exc.read().decode('utf-8')
                 print(f"[telegram] {method} response: {error_body}")
-            except:
-                pass
+            except Exception as e:
+                print(f"[telegram] Could not read error body: {e}")
         return None
 
 
