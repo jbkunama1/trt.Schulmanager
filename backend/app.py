@@ -873,11 +873,13 @@ def tg_call(method: str, **params):
 def tg_send(text: str, chat_id: str = None, reply_markup: dict = None):
     cid = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_TOKEN or not cid:
+        print(f"[telegram] tg_send skipped: token present={bool(TELEGRAM_TOKEN)}, cid={cid}")
         return
     params = {"chat_id": cid, "text": text[:4000], "parse_mode": "HTML"}
     if reply_markup:
         params["reply_markup"] = reply_markup
-    tg_call("sendMessage", **params)
+    res = tg_call("sendMessage", **params)
+    print(f"[telegram] sendMessage result: {res}")
     text = text[4000:]
     while text:
         tg_call("sendMessage", chat_id=cid, text=text[:4000], parse_mode="HTML")
