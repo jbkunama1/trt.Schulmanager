@@ -10,6 +10,7 @@ import sqlite3
 import threading
 import time
 import urllib.request
+import html
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
