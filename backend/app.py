@@ -871,16 +871,32 @@ def tg_call(method: str, **params):
         return None
 
 
+import html
+# ... (rest of imports)
+
 def tg_send(text: str, chat_id: str = None, reply_markup: dict = None):
     cid = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_TOKEN or not cid:
-        print(f"[telegram] tg_send skipped: token present={bool(TELEGRAM_TOKEN)}, cid={cid}")
         return
+    
+    # Escape text if it contains '<' but not our allowed tags
+    # Simple heuristic: if it contains '<' and not '<b>', '</b>', '<code>', '</code>'
+    # Actually, let's just escape everything and then unescape our allowed tags
+    # Or better: use a safer approach.
+    # For now, let's just escape the whole text and then replace our allowed tags back.
+    
+    def escape_html(t):
+        t = html.escape(t)
+        t = t.replace("&lt;b&gt;", "<b>").replace("&lt;/b&gt;", "</b>")
+        t = t.replace("&lt;code&gt;", "<code>").replace("&lt;/code&gt;", "</code>")
+        return t
+
+    text = escape_html(text)
+    
     params = {"chat_id": cid, "text": text[:4000], "parse_mode": "HTML"}
     if reply_markup:
         params["reply_markup"] = reply_markup
-    res = tg_call("sendMessage", **params)
-    print(f"[telegram] sendMessage result: {res}")
+    tg_call("sendMessage", **params)
     text = text[4000:]
     while text:
         tg_call("sendMessage", chat_id=cid, text=text[:4000], parse_mode="HTML")
