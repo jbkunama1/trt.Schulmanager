@@ -37,6 +37,11 @@ MAX_BULK_STUDENTS = 60
 DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
 
 app = FastAPI(title="trt.Schulmanager API", version="2.5.0")
+
+# Mount static files for frontend
+BASE_DIR = Path(__file__).resolve().parent
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
 TOKENS: Set[str] = set()
 STUDENT_TOKENS: Dict[str, str] = {}
 
@@ -763,6 +768,11 @@ if(STOKEN) loadMyFiles();
 @app.get("/upload")
 def upload_page():
     return HTMLResponse(UPLOAD_PAGE)
+
+
+@app.get("/")
+def root():
+    return HTMLResponse((BASE_DIR / "static" / "index.html").read_text(encoding="utf-8"))
 
 
 # ============ Notenlogik (Port aus dem Frontend, fuer Telegram-Befehle) ============
